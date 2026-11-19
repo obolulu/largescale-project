@@ -1,0 +1,233 @@
+# SE4458 Midterm: AI Billing Support Assistant (Group 2): Project Plan
+
+> **Individual work.** The brief says "Every student will do their own midterm, no groups." "Group 2" is only the scenario assignment.
+
+## 1. What we're building
+
+Four parts, each its own service:
+
+1. **Billing REST API + PostgreSQL**: Add Usage, Calculate Bill, Query Bill, Query Bill Detailed, Pay Bill. All versioned under `/api/v1/...`.
+2. **API Gateway**: every REST call goes through it, including the agent's calls. It also checks JWTs on the protected routes.
+3. **MCP server**: indexes `Mobile_Provider_Billing_Guide.md` once at startup and exposes `search_billing_documentation(query)`. It returns excerpts with section references.
+4. **AI agent**: a CLI or simple web chat. The LLM picks tools through real function calling, the agent runs them (MCP directly, REST through the gateway), and the LLM writes the final answer from the results.
+
+> The billing guide was embedded in the brief .docx as an attached file. It's extracted to [`docs/Mobile_Provider_Billing_Guide.md`](Mobile_Provider_Billing_Guide.md) (document ID `MOB-BILLING-2026-01`, effective Nov 1, 2026), and a copy lives in `mcp-server/data/` for indexing. Section numbers quoted below (§x.y) refer to it.
+
+### Architecture
+
+```
+User ──> AI Agent <──> LLM (tool selection + answer generation)
+            │
+            ├── MCP Client ──> MCP Server ──> indexed billing guide
+            │
+            └── HTTP + JWT ──> API Gateway ──> Billing REST API ──> PostgreSQL
+```
+
+The LLM never calls backend services directly. The agent runs every tool call.
+
+---
+
+## 2. Tech stack
+
+| Part | Choice | Why |
+|---|---|---|
+| API | Python + FastAPI | Swagger UI comes built in at `/docs`, and versioned routers are easy |
+| DB | PostgreSQL (SQLAlchemy + Alembic) | SQLite isn't allowed |
+| MCP | Official `mcp` Python SDK (FastMCP) + SQLite FTS5 or BM25 (`rank_bm25`) for the index | Counts as a "real MCP SDK server", and full-text search is enough |
+| Agent | Python, using an LLM with tool calling (a small, cheap model such as GPT-4o-mini, Claude Haiku or Gemini Flash) | The brief asks for low cost, and the cost must be documented |
+| Gateway | Azure API Management (Consumption tier) or Kong | Both are named in the brief |
+| Cloud | Azure for Students (Container Apps + Azure Database for PostgreSQL Flexible) | Deploying locally costs points |
+| Tests | pytest + FastAPI TestClient, Postgres via testcontainers or docker-compose, LLM mocked | Tests must run without the cloud or a live LLM |
+
+---
+
+## 3. Business logic (25 pts)
+
+### Add Usage
+- [ ] Each call adds a fixed unit, **10 minutes** of phone or **1 MB** of internet, keyed by subscriber, month and year.
+
+### Calculate Bill
+- [ ] **Phone:** the first 1,000 minutes are free, then $10 for each started 1,000-minute block.
+  - 1,000 min → $0 · 1,001 min → $10 · 2,001 min → $20
+- [ ] **Internet:** $50 for up to 20 GB, then $10 for each started extra 10 GB block. **1 GB = 1,000 MB.**
+  - 20,000 MB → $50 · 20,001 MB → $60 · 30,001 MB → $70
+  - Guide formula (§4.2): phone = `$10 × ceil(max(0, min − 1000) / 1000)`, internet = `$50 + $10 × ceil(max(0, GB − 20) / 10)`. Implemented in integer MB so 20,001 MB is never rounded away.
+- [x] The $50 **is** charged when internet use is 0 (§3.1: "including months with zero usage").
+- [x] No taxes, activation fees or discounts (§4.2). Total = phone + internet.
+- [ ] Test against the worked example (§4.3): 1,350 min + 35 GB → $10 + $70 = **$80**.
+- [ ] Decide and document what happens when a partly paid bill is recalculated. (Suggestion: update the total and keep `paid_amount`.)
+
+### Pay Bill
+- [ ] UNIQUE constraint on `transaction_id`, so duplicates return 409.
+- [ ] Reject amounts ≤ 0 or above the remaining balance.
+- [ ] Status: `UNPAID`, `PARTIAL` or `PAID`.
+- [ ] Simulated only: no real card processing.
+
+### Query Bill / Query Bill Detailed
+- [ ] Query Bill returns total, paid amount, remaining balance and status.
+- [ ] Query Bill Detailed returns total, paid, remaining, phone minutes, internet MB/GB and the charge breakdown, **paged** over usage line items.
+
+> **Resolved:** the brief's sample "Apr 2025 → $75" can't come from these rules, since totals only move in $10 steps from $50 and the guide rules out fees and tax (§4.2). Treat it as an illustration of the response shape and say so in the README assumptions.
+
+---
+
+## 4. Data model (ER diagram)
+
+- `users` (id, username, password_hash, role: SUBSCRIBER/ADMIN, subscriber_no)
+- `subscribers` (subscriber_no PK, name, plan)
+- `usage_records` (id, subscriber_no FK, year, month, type PHONE/INTERNET, amount, created_at). Raw records make detailed paging possible. Add Usage always writes 10 min / 1 MB. The seed script writes larger batched records (for example 500 MB) so a 35 GB month doesn't need 35,000 rows. Document this.
+- `bills` (id, subscriber_no FK, year, month, phone_minutes, internet_mb, phone_charge, internet_charge, total, paid_amount, status, UNIQUE(subscriber_no, year, month))
+- `payments` (id, bill_id FK, transaction_id UNIQUE, amount, created_at)
+
+---
+
+## 5. Auth and safety (10 pts + part of the agent score)
+
+| Endpoint | Auth | Paging |
+|---|---|---|
+| Query Bill | NO | NO |
+| Query Bill Detailed | YES | YES |
+| Pay Bill | YES | NO |
+| Calculate Bill | YES (admin) | NO |
+| Add Usage | YES (admin) | NO |
+
+- [ ] `POST /api/v1/auth/login` returns a JWT with `sub=subscriber_no` and `role`.
+- [ ] Making Add Usage and Calculate admin-only is a design choice. Document it.
+- [ ] **Key rule:** for protected calls, take the subscriber number from the **token**, never from the prompt. If someone types "show me subscriber 999's details," the API returns 403. Show this in the demo.
+- [ ] **Payment confirmation is enforced in code, not just in the prompt.** When the LLM asks for `pay_bill`, the agent pauses, shows `Pay $X for Oct 2025? (yes/no)` and only calls the API after an explicit yes. The agent generates the transaction ID (a UUID).
+
+---
+
+## 6. MCP server (20 pts)
+
+- [ ] Split the markdown into one chunk per `###` subsection (the guide's subsections are all short, so no further splitting is needed). Sections without subsections (§1, §9) become one chunk each.
+- [ ] Keep the section ID and heading on each chunk, for example `3.2` / `Additional internet blocks`.
+- [ ] Build the index **once at startup** (or as a build step), never per query. Say this explicitly in the README.
+- [ ] Tool: `search_billing_documentation(query: str)` → the shape the guide asks for (§9): `{document, matches: [{section, heading, text}]}`, top 3. Adding `document_id` and `score` per match is fine.
+- [ ] Write down three retrieval tests with their outputs:
+  1. "extra internet price" → expect §3.2 / §8.1
+  2. "partial payment rules" → expect §5.1 / §8.3
+  3. "late payment penalty" → expect §6.2 (the right answer is that the reminder adds **no** fee) and §6.3
+
+---
+
+## 7. AI agent (20 pts)
+
+- [ ] Tools given to the LLM: `search_billing_documentation`, `query_bill`, `query_bill_detailed`, `pay_bill`.
+- [ ] Loop: user message → LLM → tool_calls → agent runs them → tool results go back to the LLM → final answer with section references.
+- [ ] System prompt rules taken from the guide:
+  - Never present a calculated estimate as a stored bill (§4.4). Use Query Bill results.
+  - Before paying, state the subscriber, billing period and amount, and get explicit consent (§5.2).
+  - Report payment success only after the API confirms it, and reuse the same transaction ID on retries (§5.3).
+  - Explain the dispute process, but never promise a refund or adjustment (§7.2, §7.3). There is no Dispute API.
+  - Never invent usage numbers. Fetch them with Query Bill Detailed (§8.2).
+- [ ] Log a **tool trace** for every turn (tool name, inputs, result, final answer) to the console and a JSON file. This is a graded deliverable.
+- [ ] Required scenarios:
+  1. **MCP only:** "How much does extra internet cost?"
+  2. **API only:** "What is my October bill?"
+  3. **Combined:** "Why is my October bill higher?" (Detailed API + MCP)
+  4. **Confirmed payment:** "Pay my bill"
+
+---
+
+## 8. API Gateway (10 pts)
+
+- [ ] Public routes, each mapped to the backend:
+  - `/api/v1/bills`
+  - `/api/v1/bills/detailed`
+  - `/api/v1/bills/calculate`
+  - `/api/v1/payments`
+  - `/api/v1/usage`
+- [ ] JWT validation at the gateway (APIM `validate-jwt` policy or the Kong JWT plugin) and again in the API.
+- [ ] Document the gateway URL, a route-mapping table and one error response (for example a 401 with no token).
+- [ ] Group 2 has no rate limit in the spec. Adding a light one is optional; document it if added.
+
+---
+
+## 9. Unit tests (part of testing + docs, 10 pts)
+
+- [ ] At least one success test and one failure or edge-case test **per API operation**.
+- [ ] Pricing edge cases (1,000 vs 1,001 min; 20,000 vs 20,001 MB; 0 usage).
+- [ ] Duplicate transaction ID, overpayment, negative amount.
+- [ ] 401 (no token) and 403 (another subscriber's data).
+- [ ] Paging on Query Bill Detailed.
+- [ ] MCP indexer/search tests.
+- [ ] Agent tests with a **mocked LLM** (tool routing, confirmation required before pay).
+- [ ] Runs with one command (for example `pytest`), with no cloud and no live LLM.
+
+---
+
+## 10. Build order
+
+| Phase | Work | Rough effort | Done |
+|---|---|---|---|
+| 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [ ] |
+| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [~] scaffolded, not yet run against Postgres |
+| 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [ ] |
+| 2b | **Cloud skeleton:** API container on Azure Container Apps behind APIM, with one public and one JWT-protected route | 0.5 day | [ ] |
+| 3 | Fill test gaps (401/403, paging, duplicates) | 1 day | [ ] |
+| 4 | MCP server + index + three retrieval tests | 1 day | [ ] |
+| 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [ ] |
+| 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [ ] |
+| 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |
+
+About two weeks of steady work. Phase 2b deliberately comes early, because cloud and gateway setup is where surprises usually show up and redeploying later is cheap.
+
+### Seed data (for the demo scenarios)
+
+| Subscriber | Period | Usage | Bill | Paid | Demo use |
+|---|---|---|---|---|---|
+| 5551001 | Sep 2026 | 800 min, 18,000 MB | $50 | $50 (PAID) | baseline month |
+| 5551001 | Oct 2026 | 1,350 min, 35,000 MB | $80 | $0 (UNPAID) | "Why is my October bill higher?", "Pay my bill"; matches the guide's §4.3 example |
+| 5551002 | Sep 2026 | 2,010 min, 30,001 MB | $90 | $40 (PARTIAL) | partial payment |
+| 5551002 | Oct 2026 | 600 min, 0 MB | $50 | $0 (UNPAID) | the zero-internet case |
+
+Logins (test values only, also in `billing-api/scripts/seed.py`): `admin`, `sub5551001`, `sub5551002`.
+
+---
+
+## 11. Repo layout
+
+```
+billing-api/       FastAPI app, models, routers/v1, tests/
+mcp-server/        server.py, indexer.py, data/Mobile_Provider_Billing_Guide.md, tests/
+agent/             agent.py, tools.py, confirmation, trace logging, tests (mock LLM)
+gateway/           APIM policy XML or kong.yml
+docs/              PLAN.md, billing guide, ER diagram, openapi.yaml, screenshots, tool traces
+docker-compose.yml
+README.md
+```
+
+---
+
+## 12. README checklist (all of it goes in the README, nothing in Moodle)
+
+- [ ] Architecture diagram, stack, and the API style chosen
+- [ ] Gateway URL, route mappings, a protected route example, an error response example
+- [ ] Swagger link + `openapi.yaml`
+- [ ] ER diagram
+- [ ] MCP tool schema and how the indexing works
+- [ ] Cloud URLs and deployment steps
+- [ ] How to run the tests + a screenshot of the output
+- [ ] Test data, credentials and steps for the instructor to reproduce results
+- [ ] Three agent scenarios with tool traces (MCP-only, API-only, combined)
+- [ ] Three MCP retrieval tests
+- [ ] Protected gateway route demo
+- [ ] Confirmed simulated payment
+- [ ] Assumptions: rounding, the $0-usage case, recalculation, error codes, identity, deployment choices, LLM cost
+- [ ] Link to the demo video
+
+---
+
+## 13. Grading reference
+
+| Area | Points |
+|---|---|
+| REST APIs and business logic | 25 |
+| AI Agent / LLM tool calling | 20 |
+| MCP server and indexing | 20 |
+| API Gateway | 10 |
+| Database and authentication | 10 |
+| Cloud deployment | 5 |
+| Testing and documentation | 10 |
+| **Total** | **100** |

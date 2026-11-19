@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Secrets and local config
+.env
+*.env.local
+
+# Agent tool traces from local runs (commit curated ones under docs/)
+agent/traces/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

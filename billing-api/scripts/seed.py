@@ -16,13 +16,13 @@ import sys
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import bcrypt
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app import pricing
 from app.db import SessionLocal
 from app.models import Bill, Payment, Role, Subscriber, UsageRecord, UsageType, User
+from app.security import hash_password
 
 PHONE_BATCH_MINUTES = 50
 INTERNET_BATCH_MB = 500
@@ -46,10 +46,6 @@ PERIODS = [
     ("5551002", 2026, 9, 2_010, 30_001, Decimal("40.00")),  # $90, PARTIAL
     ("5551002", 2026, 10, 600, 0, Decimal("0.00")),  # $50, UNPAID (zero internet)
 ]
-
-
-def _hash(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def _batched_usage(
@@ -80,7 +76,8 @@ def seed(session: Session) -> None:
     session.flush()
 
     session.add_all(
-        User(username=u, password_hash=_hash(p), role=r, subscriber_no=s) for u, p, r, s in USERS
+        User(username=u, password_hash=hash_password(p), role=r, subscriber_no=s)
+        for u, p, r, s in USERS
     )
 
     for subscriber_no, year, month, minutes, mb, paid in PERIODS:

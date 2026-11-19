@@ -1,0 +1,9 @@
+[project]
+name = "billing-docs-mcp"
+version = "1.0.0"
+description = "SE4458 midterm: MCP server for the Mobile Provider Billing Guide"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -7,3 +7,8 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = [
+    # SQLite stores NUMERIC as float; values here have 2 decimals so the round trip is exact.
+    "ignore:Dialect sqlite\\+pysqlite does \\*not\\* support Decimal objects natively",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

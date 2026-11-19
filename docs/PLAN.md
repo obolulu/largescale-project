@@ -33,7 +33,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 |---|---|---|
 | API | Python + FastAPI | Swagger UI comes built in at `/docs`, and versioned routers are easy |
 | DB | PostgreSQL (SQLAlchemy + Alembic) | SQLite isn't allowed |
-| MCP | Official `mcp` Python SDK (FastMCP) + SQLite FTS5 or BM25 (`rank_bm25`) for the index | Counts as a "real MCP SDK server", and full-text search is enough |
+| MCP | Official `mcp` Python SDK 2.x (`MCPServer`, formerly FastMCP) + a small built-in BM25 index | Counts as a "real MCP SDK server", and full-text search is enough |
 | Agent | Python, using an LLM with tool calling (a small, cheap model such as GPT-4o-mini, Claude Haiku or Gemini Flash) | The brief asks for low cost, and the cost must be documented |
 | Gateway | Azure API Management (Consumption tier) or Kong | Both are named in the brief |
 | Cloud | Azure for Students (Container Apps + Azure Database for PostgreSQL Flexible) | Deploying locally costs points |
@@ -91,23 +91,25 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | Calculate Bill | YES (admin) | NO |
 | Add Usage | YES (admin) | NO |
 
-- [ ] `POST /api/v1/auth/login` returns a JWT with `sub=subscriber_no` and `role`.
-- [ ] Making Add Usage and Calculate admin-only is a design choice. Document it.
-- [ ] **Key rule:** for protected calls, take the subscriber number from the **token**, never from the prompt. If someone types "show me subscriber 999's details," the API returns 403. Show this in the demo.
+- [x] `POST /api/v1/auth/login` returns a JWT with `sub=username`, `role`, `subscriber_no`, `iss` and `aud` (the gateway checks `iss`/`aud` too).
+- [x] Add Usage and Calculate Bill are admin-only; Pay Bill and Query Bill Detailed allow the subscriber (own account) or an admin. Documented in the README.
+- [x] **Key rule:** for protected calls, the subscriber number comes from the **token**, never from the prompt. If someone types "show me subscriber 999's details," the API returns 403. Covered by tests; still to show in the demo.
+- [ ] Query Bill is public by spec, so the **agent** must always fill `subscriber_no` from the logged-in session, never from the prompt (Phase 5).
 - [ ] **Payment confirmation is enforced in code, not just in the prompt.** When the LLM asks for `pay_bill`, the agent pauses, shows `Pay $X for Oct 2025? (yes/no)` and only calls the API after an explicit yes. The agent generates the transaction ID (a UUID).
 
 ---
 
 ## 6. MCP server (20 pts)
 
-- [ ] Split the markdown into one chunk per `###` subsection (the guide's subsections are all short, so no further splitting is needed). Sections without subsections (§1, §9) become one chunk each.
-- [ ] Keep the section ID and heading on each chunk, for example `3.2` / `Additional internet blocks`.
-- [ ] Build the index **once at startup** (or as a build step), never per query. Say this explicitly in the README.
-- [ ] Tool: `search_billing_documentation(query: str)` → the shape the guide asks for (§9): `{document, matches: [{section, heading, text}]}`, top 3. Adding `document_id` and `score` per match is fine.
-- [ ] Write down three retrieval tests with their outputs:
-  1. "extra internet price" → expect §3.2 / §8.1
-  2. "partial payment rules" → expect §5.1 / §8.3
-  3. "late payment penalty" → expect §6.2 (the right answer is that the reminder adds **no** fee) and §6.3
+- [x] Split the markdown into one chunk per `###` subsection (the guide's subsections are all short, so no further splitting is needed). Sections without subsections (§1, §9) become one chunk each. 25 chunks.
+- [x] Keep the section ID and heading on each chunk, for example `3.2` / `Additional internet blocks`, plus the parent heading and a `reference` string for citations.
+- [x] Build the index **once at startup**, never per query. Stated in the README and covered by a test.
+- [x] Tool: `search_billing_documentation(query, max_results=3)` → `{document, document_id, query, matches: [{section, heading, parent_heading, reference, text, score}]}`.
+- [x] Transports: stdio (local agent) and Streamable HTTP at `/mcp` with `/health` (for hosting).
+- [x] Three retrieval tests written to `docs/mcp_retrieval_tests.md` by `scripts/retrieval_demo.py`:
+  1. "extra internet price" → §8.1, §3.2
+  2. "partial payment rules" → §5.1
+  3. "late payment penalty" → §6.2 (the reminder adds **no** fee), §6.1, §6.3
 
 ---
 
@@ -162,11 +164,11 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | Phase | Work | Rough effort | Done |
 |---|---|---|---|
 | 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [ ] |
-| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [~] scaffolded, not yet run against Postgres |
-| 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [ ] |
+| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [~] done, not yet run against Postgres |
+| 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [~] done, 75 tests pass on SQLite; not yet run against Postgres |
 | 2b | **Cloud skeleton:** API container on Azure Container Apps behind APIM, with one public and one JWT-protected route | 0.5 day | [ ] |
-| 3 | Fill test gaps (401/403, paging, duplicates) | 1 day | [ ] |
-| 4 | MCP server + index + three retrieval tests | 1 day | [ ] |
+| 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [ ] |
+| 4 | MCP server + index + three retrieval tests | 1 day | [x] 32 tests; checked over stdio and HTTP |
 | 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [ ] |
 | 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [ ] |
 | 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |

@@ -5,7 +5,9 @@ All arithmetic is integer (minutes, MB) to avoid float rounding at block edges:
 20,001 MB must cost $60, not $50.
 """
 
+import calendar
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.models import BillStatus
@@ -29,20 +31,40 @@ def _started_blocks(amount: int, block_size: int) -> int:
     return -(-amount // block_size)
 
 
-def phone_charge(minutes: int) -> Decimal:
-    """§4.2: $10 × ceil(max(0, minutes − 1000) / 1000)."""
+def phone_extra_minutes(minutes: int) -> int:
     if minutes < 0:
         raise ValueError("minutes cannot be negative")
-    extra = max(0, minutes - FREE_MINUTES)
-    return PHONE_BLOCK_PRICE * _started_blocks(extra, PHONE_BLOCK_MINUTES)
+    return max(0, minutes - FREE_MINUTES)
+
+
+def phone_blocks(minutes: int) -> int:
+    return _started_blocks(phone_extra_minutes(minutes), PHONE_BLOCK_MINUTES)
+
+
+def phone_charge(minutes: int) -> Decimal:
+    """§4.2: $10 × ceil(max(0, minutes − 1000) / 1000)."""
+    return PHONE_BLOCK_PRICE * phone_blocks(minutes)
+
+
+def internet_extra_mb(megabytes: int) -> int:
+    if megabytes < 0:
+        raise ValueError("megabytes cannot be negative")
+    return max(0, megabytes - INCLUDED_MB)
+
+
+def internet_blocks(megabytes: int) -> int:
+    return _started_blocks(internet_extra_mb(megabytes), INTERNET_BLOCK_MB)
 
 
 def internet_charge(megabytes: int) -> Decimal:
     """§4.2: $50 + $10 × ceil(max(0, GB − 20) / 10), computed in MB."""
-    if megabytes < 0:
-        raise ValueError("megabytes cannot be negative")
-    extra = max(0, megabytes - INCLUDED_MB)
-    return INTERNET_BASE_PRICE + INTERNET_BLOCK_PRICE * _started_blocks(extra, INTERNET_BLOCK_MB)
+    return INTERNET_BASE_PRICE + INTERNET_BLOCK_PRICE * internet_blocks(megabytes)
+
+
+def due_date(year: int, month: int) -> date:
+    """§6.1: due 15 calendar days after the end of the billing month."""
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, last_day) + timedelta(days=15)
 
 
 @dataclass(frozen=True)

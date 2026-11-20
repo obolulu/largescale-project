@@ -34,7 +34,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | API | TypeScript + NestJS 11 (Express) | `@nestjs/swagger` generates Swagger UI at `/docs` and `openapi.yaml` from the DTOs; guards give clean JWT/role checks |
 | DB | PostgreSQL (TypeORM, hand-written SQL migrations) | SQLite isn't allowed |
 | MCP | Official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, `McpServer`) + a small built-in BM25 index | Counts as a "real MCP SDK server", and full-text search is enough |
-| Agent | TypeScript, using an LLM with tool calling (a small, cheap model) | The brief asks for low cost, and the cost must be documented |
+| Agent | TypeScript CLI on the Anthropic SDK (`@anthropic-ai/sdk`), a hand-written tool loop; Claude Opus 5.5 at low effort by default, any model via `AGENT_MODEL` | The brief asks for low cost, and the cost must be documented: each turn logs its token usage and estimated cost |
 | Gateway | Azure API Management (Consumption tier) or Kong | Both are named in the brief |
 | Cloud | Azure for Students (Container Apps + Azure Database for PostgreSQL Flexible) | Deploying locally costs points |
 | Tests | Jest + supertest (API) on Postgres via in-process PGlite or `TEST_DATABASE_URL`; Vitest (MCP); LLM mocked | Tests must run without the cloud or a live LLM |
@@ -46,28 +46,28 @@ The LLM never calls backend services directly. The agent runs every tool call.
 ## 3. Business logic (25 pts)
 
 ### Add Usage
-- [ ] Each call adds a fixed unit, **10 minutes** of phone or **1 MB** of internet, keyed by subscriber, month and year.
+- [x] Each call adds a fixed unit, **10 minutes** of phone or **1 MB** of internet, keyed by subscriber, month and year.
 
 ### Calculate Bill
-- [ ] **Phone:** the first 1,000 minutes are free, then $10 for each started 1,000-minute block.
+- [x] **Phone:** the first 1,000 minutes are free, then $10 for each started 1,000-minute block.
   - 1,000 min → $0 · 1,001 min → $10 · 2,001 min → $20
-- [ ] **Internet:** $50 for up to 20 GB, then $10 for each started extra 10 GB block. **1 GB = 1,000 MB.**
+- [x] **Internet:** $50 for up to 20 GB, then $10 for each started extra 10 GB block. **1 GB = 1,000 MB.**
   - 20,000 MB → $50 · 20,001 MB → $60 · 30,001 MB → $70
   - Guide formula (§4.2): phone = `$10 × ceil(max(0, min − 1000) / 1000)`, internet = `$50 + $10 × ceil(max(0, GB − 20) / 10)`. Implemented in integer MB so 20,001 MB is never rounded away.
 - [x] The $50 **is** charged when internet use is 0 (§3.1: "including months with zero usage").
 - [x] No taxes, activation fees or discounts (§4.2). Total = phone + internet.
-- [ ] Test against the worked example (§4.3): 1,350 min + 35 GB → $10 + $70 = **$80**.
-- [ ] Decide and document what happens when a partly paid bill is recalculated. (Suggestion: update the total and keep `paid_amount`.)
+- [x] Test against the worked example (§4.3): 1,350 min + 35 GB → $10 + $70 = **$80**.
+- [x] Decide and document what happens when a partly paid bill is recalculated. Decided: update the total and keep `paid_amount`; the remaining balance floors at 0 (README assumptions, tested).
 
 ### Pay Bill
-- [ ] UNIQUE constraint on `transaction_id`, so duplicates return 409.
-- [ ] Reject amounts ≤ 0 or above the remaining balance.
-- [ ] Status: `UNPAID`, `PARTIAL` or `PAID`.
-- [ ] Simulated only: no real card processing.
+- [x] UNIQUE constraint on `transaction_id`, so duplicates return 409.
+- [x] Reject amounts ≤ 0 or above the remaining balance.
+- [x] Status: `UNPAID`, `PARTIAL` or `PAID`.
+- [x] Simulated only: no real card processing.
 
 ### Query Bill / Query Bill Detailed
-- [ ] Query Bill returns total, paid amount, remaining balance and status.
-- [ ] Query Bill Detailed returns total, paid, remaining, phone minutes, internet MB/GB and the charge breakdown, **paged** over usage line items.
+- [x] Query Bill returns total, paid amount, remaining balance and status.
+- [x] Query Bill Detailed returns total, paid, remaining, phone minutes, internet MB/GB and the charge breakdown, **paged** over usage line items.
 
 > **Resolved:** the brief's sample "Apr 2025 → $75" can't come from these rules, since totals only move in $10 steps from $50 and the guide rules out fees and tax (§4.2). Treat it as an illustration of the response shape and say so in the README assumptions.
 
@@ -96,8 +96,8 @@ The LLM never calls backend services directly. The agent runs every tool call.
 - [x] `POST /api/v1/auth/login` returns a JWT with `sub=username`, `role`, `subscriber_no`, `iss` and `aud` (the gateway checks `iss`/`aud` too).
 - [x] Add Usage and Calculate Bill are admin-only; Pay Bill and Query Bill Detailed allow the subscriber (own account) or an admin. Documented in the README.
 - [x] **Key rule:** for protected calls, the subscriber number comes from the **token**, never from the prompt. If someone types "show me subscriber 999's details," the API returns 403. Covered by tests; still to show in the demo.
-- [ ] Query Bill is public by spec, so the **agent** must always fill `subscriber_no` from the logged-in session, never from the prompt (Phase 5).
-- [ ] **Payment confirmation is enforced in code, not just in the prompt.** When the LLM asks for `pay_bill`, the agent pauses, shows `Pay $X for Oct 2025? (yes/no)` and only calls the API after an explicit yes. The agent generates the transaction ID (a UUID).
+- [x] Query Bill is public by spec, so the **agent** must always fill `subscriber_no` from the logged-in session, never from the prompt (Phase 5).
+- [x] **Payment confirmation is enforced in code, not just in the prompt.** When the LLM asks for `pay_bill`, the agent pauses, shows `Pay $X for Oct 2025? (yes/no)` and only calls the API after an explicit yes. The agent generates the transaction ID (a UUID).
 
 ---
 
@@ -117,16 +117,16 @@ The LLM never calls backend services directly. The agent runs every tool call.
 
 ## 7. AI agent (20 pts)
 
-- [ ] Tools given to the LLM: `search_billing_documentation`, `query_bill`, `query_bill_detailed`, `pay_bill`.
-- [ ] Loop: user message → LLM → tool_calls → agent runs them → tool results go back to the LLM → final answer with section references.
-- [ ] System prompt rules taken from the guide:
+- [x] Tools given to the LLM: `search_billing_documentation`, `query_bill`, `query_bill_detailed`, `pay_bill`.
+- [x] Loop: user message → LLM → tool_calls → agent runs them → tool results go back to the LLM → final answer with section references.
+- [x] System prompt rules taken from the guide:
   - Never present a calculated estimate as a stored bill (§4.4). Use Query Bill results.
   - Before paying, state the subscriber, billing period and amount, and get explicit consent (§5.2).
   - Report payment success only after the API confirms it, and reuse the same transaction ID on retries (§5.3).
   - Explain the dispute process, but never promise a refund or adjustment (§7.2, §7.3). There is no Dispute API.
   - Never invent usage numbers. Fetch them with Query Bill Detailed (§8.2).
-- [ ] Log a **tool trace** for every turn (tool name, inputs, result, final answer) to the console and a JSON file. This is a graded deliverable.
-- [ ] Required scenarios:
+- [x] Log a **tool trace** for every turn (tool name, inputs, result, final answer) to the console and a JSON file. This is a graded deliverable.
+- [ ] Required scenarios (all four pass with a mocked LLM and against the real API + MCP server; still to run with the live LLM and save the traces):
   1. **MCP only:** "How much does extra internet cost?"
   2. **API only:** "What is my October bill?"
   3. **Combined:** "Why is my October bill higher?" (Detailed API + MCP)
@@ -150,14 +150,14 @@ The LLM never calls backend services directly. The agent runs every tool call.
 
 ## 9. Unit tests (part of testing + docs, 10 pts)
 
-- [ ] At least one success test and one failure or edge-case test **per API operation**.
-- [ ] Pricing edge cases (1,000 vs 1,001 min; 20,000 vs 20,001 MB; 0 usage).
-- [ ] Duplicate transaction ID, overpayment, negative amount.
-- [ ] 401 (no token) and 403 (another subscriber's data).
-- [ ] Paging on Query Bill Detailed.
-- [ ] MCP indexer/search tests.
-- [ ] Agent tests with a **mocked LLM** (tool routing, confirmation required before pay).
-- [ ] Runs with one command per service (`npm test`), with no cloud and no live LLM.
+- [x] At least one success test and one failure or edge-case test **per API operation**.
+- [x] Pricing edge cases (1,000 vs 1,001 min; 20,000 vs 20,001 MB; 0 usage).
+- [x] Duplicate transaction ID, overpayment, negative amount.
+- [x] 401 (no token) and 403 (another subscriber's data).
+- [x] Paging on Query Bill Detailed.
+- [x] MCP indexer/search tests.
+- [x] Agent tests with a **mocked LLM** (tool routing, confirmation required before pay).
+- [x] Runs with one command per service (`npm test`), with no cloud and no live LLM.
 
 ---
 
@@ -171,7 +171,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | 2b | **Cloud skeleton:** API container on Azure Container Apps behind APIM, with one public and one JWT-protected route | 0.5 day | [ ] |
 | 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; screenshot still to do |
 | 4 | MCP server + index + three retrieval tests | 1 day | [x] ported to the TypeScript SDK |
-| 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [ ] |
+| 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [~] built; 48 tests pass with a mocked LLM; live-LLM run and saved traces still to do |
 | 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [ ] |
 | 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |
 
@@ -208,14 +208,14 @@ README.md
 
 - [ ] Architecture diagram, stack, and the API style chosen
 - [ ] Gateway URL, route mappings, a protected route example, an error response example
-- [ ] Swagger link + `openapi.yaml`
+- [x] Swagger link + `openapi.yaml`
 - [ ] ER diagram
-- [ ] MCP tool schema and how the indexing works
+- [x] MCP tool schema and how the indexing works
 - [ ] Cloud URLs and deployment steps
 - [ ] How to run the tests + a screenshot of the output
 - [ ] Test data, credentials and steps for the instructor to reproduce results
 - [ ] Three agent scenarios with tool traces (MCP-only, API-only, combined)
-- [ ] Three MCP retrieval tests
+- [x] Three MCP retrieval tests
 - [ ] Protected gateway route demo
 - [ ] Confirmed simulated payment
 - [ ] Assumptions: rounding, the $0-usage case, recalculation, error codes, identity, deployment choices, LLM cost

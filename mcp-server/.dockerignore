@@ -1,5 +1,9 @@
+node_modules
+dist
+test
+scripts
+coverage
+*.log
 .venv
 __pycache__
 .pytest_cache
-tests
-scripts

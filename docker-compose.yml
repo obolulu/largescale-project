@@ -18,7 +18,7 @@ services:
   billing-api:
     build: ./billing-api
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-billing}:${POSTGRES_PASSWORD:-billing_dev_password}@db:5432/${POSTGRES_DB:-billing}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-billing}:${POSTGRES_PASSWORD:-billing_dev_password}@db:5432/${POSTGRES_DB:-billing}
       JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-in-cloud-0001}
     ports:
       - "8000:8000"

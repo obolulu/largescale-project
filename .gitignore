@@ -8,6 +8,12 @@ venv/
 htmlcov/
 *.egg-info/
 
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
 # Secrets and local config
 .env
 *.env.local

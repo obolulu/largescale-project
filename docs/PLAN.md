@@ -31,13 +31,15 @@ The LLM never calls backend services directly. The agent runs every tool call.
 
 | Part | Choice | Why |
 |---|---|---|
-| API | Python + FastAPI | Swagger UI comes built in at `/docs`, and versioned routers are easy |
-| DB | PostgreSQL (SQLAlchemy + Alembic) | SQLite isn't allowed |
-| MCP | Official `mcp` Python SDK 2.x (`MCPServer`, formerly FastMCP) + a small built-in BM25 index | Counts as a "real MCP SDK server", and full-text search is enough |
-| Agent | Python, using an LLM with tool calling (a small, cheap model such as GPT-4o-mini, Claude Haiku or Gemini Flash) | The brief asks for low cost, and the cost must be documented |
+| API | TypeScript + NestJS 11 (Express) | `@nestjs/swagger` generates Swagger UI at `/docs` and `openapi.yaml` from the DTOs; guards give clean JWT/role checks |
+| DB | PostgreSQL (TypeORM, hand-written SQL migrations) | SQLite isn't allowed |
+| MCP | Official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, `McpServer`) + a small built-in BM25 index | Counts as a "real MCP SDK server", and full-text search is enough |
+| Agent | TypeScript, using an LLM with tool calling (a small, cheap model) | The brief asks for low cost, and the cost must be documented |
 | Gateway | Azure API Management (Consumption tier) or Kong | Both are named in the brief |
 | Cloud | Azure for Students (Container Apps + Azure Database for PostgreSQL Flexible) | Deploying locally costs points |
-| Tests | pytest + FastAPI TestClient, Postgres via testcontainers or docker-compose, LLM mocked | Tests must run without the cloud or a live LLM |
+| Tests | Jest + supertest (API) on Postgres via in-process PGlite or `TEST_DATABASE_URL`; Vitest (MCP); LLM mocked | Tests must run without the cloud or a live LLM |
+
+> The project was first written in Python (FastAPI, SQLAlchemy, MCP Python SDK) and then ported to TypeScript with the same API contract and MCP tool behaviour. The Python version is the "Python implementation snapshot" commit in git history.
 
 ---
 
@@ -106,7 +108,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 - [x] Build the index **once at startup**, never per query. Stated in the README and covered by a test.
 - [x] Tool: `search_billing_documentation(query, max_results=3)` → `{document, document_id, query, matches: [{section, heading, parent_heading, reference, text, score}]}`.
 - [x] Transports: stdio (local agent) and Streamable HTTP at `/mcp` with `/health` (for hosting).
-- [x] Three retrieval tests written to `docs/mcp_retrieval_tests.md` by `scripts/retrieval_demo.py`:
+- [x] Three retrieval tests written to `docs/mcp_retrieval_tests.md` by `scripts/retrieval-demo.ts`:
   1. "extra internet price" → §8.1, §3.2
   2. "partial payment rules" → §5.1
   3. "late payment penalty" → §6.2 (the reminder adds **no** fee), §6.1, §6.3
@@ -155,7 +157,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 - [ ] Paging on Query Bill Detailed.
 - [ ] MCP indexer/search tests.
 - [ ] Agent tests with a **mocked LLM** (tool routing, confirmation required before pay).
-- [ ] Runs with one command (for example `pytest`), with no cloud and no live LLM.
+- [ ] Runs with one command per service (`npm test`), with no cloud and no live LLM.
 
 ---
 
@@ -164,11 +166,11 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | Phase | Work | Rough effort | Done |
 |---|---|---|---|
 | 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [ ] |
-| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [~] done, not yet run against Postgres |
-| 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [~] done, 75 tests pass on SQLite; not yet run against Postgres |
+| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [x] migrations and seed run on Postgres (PGlite); Docker image not yet built |
+| 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [x] ported to NestJS; 86 tests pass on Postgres |
 | 2b | **Cloud skeleton:** API container on Azure Container Apps behind APIM, with one public and one JWT-protected route | 0.5 day | [ ] |
-| 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [ ] |
-| 4 | MCP server + index + three retrieval tests | 1 day | [x] 32 tests; checked over stdio and HTTP |
+| 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; screenshot still to do |
+| 4 | MCP server + index + three retrieval tests | 1 day | [x] ported to the TypeScript SDK |
 | 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [ ] |
 | 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [ ] |
 | 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |
@@ -184,16 +186,16 @@ About two weeks of steady work. Phase 2b deliberately comes early, because cloud
 | 5551002 | Sep 2026 | 2,010 min, 30,001 MB | $90 | $40 (PARTIAL) | partial payment |
 | 5551002 | Oct 2026 | 600 min, 0 MB | $50 | $0 (UNPAID) | the zero-internet case |
 
-Logins (test values only, also in `billing-api/scripts/seed.py`): `admin`, `sub5551001`, `sub5551002`.
+Logins (test values only, also in `billing-api/scripts/seed.ts`): `admin`, `sub5551001`, `sub5551002`.
 
 ---
 
 ## 11. Repo layout
 
 ```
-billing-api/       FastAPI app, models, routers/v1, tests/
-mcp-server/        server.py, indexer.py, data/Mobile_Provider_Billing_Guide.md, tests/
-agent/             agent.py, tools.py, confirmation, trace logging, tests (mock LLM)
+billing-api/       NestJS app: src/ (api, auth, billing, pricing, database), scripts/, test/
+mcp-server/        src/indexer.ts, src/server.ts, data/Mobile_Provider_Billing_Guide.md, test/
+agent/             agent, tools, confirmation, trace logging, tests (mock LLM)
 gateway/           APIM policy XML or kong.yml
 docs/              PLAN.md, billing guide, ER diagram, openapi.yaml, screenshots, tool traces
 docker-compose.yml

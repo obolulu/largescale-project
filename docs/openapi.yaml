@@ -1,46 +1,33 @@
-openapi: 3.1.0
-info:
-  title: Mobile Provider Billing API
-  description: 'SE4458 midterm billing service. All routes are versioned under `/api/v1`.
-
-
-    Protected routes need `Authorization: Bearer <JWT>` from `POST /api/v1/auth/login`.
-    Subscribers can only act on the subscriber number in their own token.'
-  version: 1.0.0
+openapi: 3.0.0
 paths:
   /api/v1/health:
     get:
-      tags:
-      - meta
-      summary: Health
-      operationId: health_api_v1_health_get
+      operationId: health
+      parameters: []
       responses:
         '200':
-          description: Successful Response
+          description: ''
           content:
             application/json:
               schema:
-                additionalProperties:
-                  type: string
-                type: object
-                title: Response Health Api V1 Health Get
+                $ref: '#/components/schemas/HealthResponse'
+      summary: Health
+      tags:
+        - meta
   /api/v1/auth/login:
     post:
-      tags:
-      - auth
-      summary: Login
-      description: 'Exchange username and password for a JWT. Send it as `Authorization:
-        Bearer <token>`.'
-      operationId: login_api_v1_auth_login_post
+      description: 'Exchange username and password for a JWT. Send it as `Authorization: Bearer <token>`.'
+      operationId: login
+      parameters: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/LoginRequest'
-        required: true
       responses:
         '200':
-          description: Successful Response
+          description: ''
           content:
             application/json:
               schema:
@@ -57,26 +44,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      summary: Login
+      tags:
+        - auth
   /api/v1/usage:
     post:
-      tags:
-      - usage
-      summary: Add Usage
-      description: '**Add Usage** (admin). Records one event: 10 minutes for PHONE,
-        1 MB for INTERNET.
+      description: |-
+        **Add Usage** (admin). Records one event: 10 minutes for PHONE, 1 MB for INTERNET.
 
-
-        Usage is not billed until Calculate Bill runs for that period again.'
-      operationId: add_usage_api_v1_usage_post
+        Usage is not billed until Calculate Bill runs for that period again.
+      operationId: addUsage
+      parameters: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/AddUsageRequest'
-        required: true
       responses:
         '201':
-          description: Successful Response
+          description: ''
           content:
             application/json:
               schema:
@@ -88,8 +75,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Authenticated but not allowed (wrong role or another subscriber's
-            data)
+          description: Authenticated but not allowed (wrong role or another subscriber's data)
           content:
             application/json:
               schema:
@@ -107,49 +93,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
-      - HTTPBearer: []
+        - HTTPBearer: []
+      summary: Add Usage
+      tags:
+        - usage
   /api/v1/bills:
     get:
-      tags:
-      - bills
-      summary: Query Bill
-      description: '**Query Bill** (no authentication, per the spec). Total, paid
-        amount, remaining balance, status.'
-      operationId: query_bill_api_v1_bills_get
+      description: >-
+        **Query Bill** (no authentication, per the spec). Total, paid amount, remaining balance,
+        status.
+      operationId: queryBill
       parameters:
-      - name: subscriber_no
-        in: query
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 20
-          examples:
-          - '5551001'
-          title: Subscriber No
-      - name: month
-        in: query
-        required: true
-        schema:
-          type: integer
-          maximum: 12
-          minimum: 1
-          examples:
-          - 10
-          title: Month
-      - name: year
-        in: query
-        required: true
-        schema:
-          type: integer
-          maximum: 2100
-          minimum: 2000
-          examples:
-          - 2026
-          title: Year
+        - name: subscriber_no
+          required: true
+          in: query
+          schema:
+            minLength: 1
+            maxLength: 20
+            example: '5551001'
+            type: string
+        - name: month
+          required: true
+          in: query
+          schema:
+            minimum: 1
+            maximum: 12
+            example: 10
+            type: integer
+        - name: year
+          required: true
+          in: query
+          schema:
+            minimum: 2000
+            maximum: 2100
+            example: 2026
+            type: integer
       responses:
         '200':
-          description: Successful Response
+          description: ''
           content:
             application/json:
               schema:
@@ -166,70 +147,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      summary: Query Bill
+      tags:
+        - bills
   /api/v1/bills/detailed:
     get:
-      tags:
-      - bills
-      summary: Query Bill Detailed
-      description: '**Query Bill Detailed** (authenticated, paged). Usage totals,
-        charge breakdown and a page of usage records.'
-      operationId: query_bill_detailed_api_v1_bills_detailed_get
-      security:
-      - HTTPBearer: []
+      description: >-
+        **Query Bill Detailed** (authenticated, paged). Usage totals, charge breakdown and a page of
+        usage records.
+      operationId: queryBillDetailed
       parameters:
-      - name: month
-        in: query
-        required: true
-        schema:
-          type: integer
-          maximum: 12
-          minimum: 1
-          examples:
-          - 10
-          title: Month
-      - name: year
-        in: query
-        required: true
-        schema:
-          type: integer
-          maximum: 2100
-          minimum: 2000
-          examples:
-          - 2026
-          title: Year
-      - name: subscriber_no
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
+        - name: month
+          required: true
+          in: query
+          schema:
+            minimum: 1
+            maximum: 12
+            example: 10
+            type: integer
+        - name: year
+          required: true
+          in: query
+          schema:
+            minimum: 2000
+            maximum: 2100
+            example: 2026
+            type: integer
+        - name: subscriber_no
+          required: false
+          in: query
+          description: Optional for subscribers (must match the token); required for admins.
+          schema:
             maxLength: 20
-          - type: 'null'
-          description: Optional for subscribers (must match the token); required for
-            admins.
-          title: Subscriber No
-        description: Optional for subscribers (must match the token); required for
-          admins.
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-          title: Page
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Page Size
+            type: string
+        - name: page
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            default: 1
+            type: integer
+        - name: page_size
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 100
+            default: 20
+            type: integer
       responses:
         '200':
-          description: Successful Response
+          description: ''
           content:
             application/json:
               schema:
@@ -241,58 +209,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Authenticated but not allowed (wrong role or another subscriber's
-            data)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Subscriber or bill not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation failed or business rule violated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /api/v1/bills/calculate:
-    post:
-      tags:
-      - bills
-      summary: Calculate Bill
-      description: '**Calculate Bill** (admin). Computes the bill from recorded usage
-        and stores it.
-
-
-        Running it again for the same period updates the charges and keeps any payments
-        already made.'
-      operationId: calculate_bill_api_v1_bills_calculate_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CalculateBillRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CalculateBillResponse'
-        '401':
-          description: Missing, invalid or expired token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '403':
-          description: Authenticated but not allowed (wrong role or another subscriber's
-            data)
+          description: Authenticated but not allowed (wrong role or another subscriber's data)
           content:
             application/json:
               schema:
@@ -310,30 +227,83 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
-      - HTTPBearer: []
+        - HTTPBearer: []
+      summary: Query Bill Detailed
+      tags:
+        - bills
+  /api/v1/bills/calculate:
+    post:
+      description: >-
+        **Calculate Bill** (admin). Computes the bill from recorded usage and stores it.
+
+
+        Running it again for the same period updates the charges and keeps any payments already
+        made.
+      operationId: calculateBill
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalculateBillRequest'
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculateBillResponse'
+        '401':
+          description: Missing, invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Authenticated but not allowed (wrong role or another subscriber's data)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Subscriber or bill not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation failed or business rule violated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - HTTPBearer: []
+      summary: Calculate Bill
+      tags:
+        - bills
   /api/v1/payments:
     post:
-      tags:
-      - payments
-      summary: Pay Bill
-      description: '**Pay Bill** (authenticated). Records a simulated full or partial
-        payment. No card processing.
+      description: >-
+        **Pay Bill** (authenticated). Records a simulated full or partial payment. No card
+        processing.
 
 
-        `transaction_id` is the idempotency key: a repeated ID returns 409 and records
-        nothing.
+        `transaction_id` is the idempotency key: a repeated ID returns 409 and records nothing.
 
-        Amounts above the remaining balance are rejected.'
-      operationId: pay_bill_api_v1_payments_post
+        Amounts above the remaining balance are rejected.
+      operationId: payBill
+      parameters: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/PayBillRequest'
-        required: true
       responses:
         '201':
-          description: Successful Response
+          description: ''
           content:
             application/json:
               schema:
@@ -345,8 +315,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Authenticated but not allowed (wrong role or another subscriber's
-            data)
+          description: Authenticated but not allowed (wrong role or another subscriber's data)
           content:
             application/json:
               schema:
@@ -370,252 +339,279 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
-      - HTTPBearer: []
+        - HTTPBearer: []
+      summary: Pay Bill
+      tags:
+        - payments
+info:
+  title: Mobile Provider Billing API
+  description: >-
+    SE4458 midterm billing service. All routes are versioned under `/api/v1`.
+
+
+    Protected routes need `Authorization: Bearer <JWT>` from `POST /api/v1/auth/login`. Subscribers
+    can only act on the subscriber number in their own token.
+  version: 1.0.0
+  contact: {}
+tags: []
+servers: []
 components:
+  securitySchemes:
+    HTTPBearer:
+      scheme: bearer
+      bearerFormat: JWT
+      type: http
+      description: JWT from POST /api/v1/auth/login
   schemas:
-    AddUsageRequest:
-      properties:
-        month:
-          type: integer
-          maximum: 12.0
-          minimum: 1.0
-          title: Month
-          examples:
-          - 10
-        year:
-          type: integer
-          maximum: 2100.0
-          minimum: 2000.0
-          title: Year
-          examples:
-          - 2026
-        subscriber_no:
-          type: string
-          maxLength: 20
-          minLength: 1
-          title: Subscriber No
-          examples:
-          - '5551001'
-        usage_type:
-          $ref: '#/components/schemas/UsageType'
+    HealthResponse:
       type: object
-      required:
-      - month
-      - year
-      - subscriber_no
-      - usage_type
-      title: AddUsageRequest
-    AddUsageResponse:
       properties:
         status:
           type: string
-          const: SUCCESS
-          title: Status
-          default: SUCCESS
-        usage_id:
+          example: ok
+        version:
+          type: string
+          example: v1
+      required:
+        - status
+        - version
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          example: UNAUTHORIZED
+        message:
+          type: string
+          example: Missing or invalid bearer token.
+        details:
+          type: object
+          description: Field errors or extra context, when there are any.
+      required:
+        - code
+        - message
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+      required:
+        - error
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          example: sub5551001
+        password:
+          type: string
+          example: sub1001-demo-pass
+      required:
+        - username
+        - password
+    Role:
+      type: string
+      enum:
+        - SUBSCRIBER
+        - ADMIN
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum:
+            - bearer
+          example: bearer
+        expires_in:
           type: integer
-          title: Usage Id
+          example: 3600
+        role:
+          allOf:
+            - $ref: '#/components/schemas/Role'
         subscriber_no:
           type: string
-          title: Subscriber No
+          nullable: true
+          example: '5551001'
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - role
+        - subscriber_no
+    UsageType:
+      type: string
+      enum:
+        - PHONE
+        - INTERNET
+    AddUsageRequest:
+      type: object
+      properties:
         month:
           type: integer
-          title: Month
+          minimum: 1
+          maximum: 12
+          example: 10
         year:
           type: integer
-          title: Year
+          minimum: 2000
+          maximum: 2100
+          example: 2026
+        subscriber_no:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: '5551001'
         usage_type:
-          $ref: '#/components/schemas/UsageType'
+          allOf:
+            - $ref: '#/components/schemas/UsageType'
+      required:
+        - month
+        - year
+        - subscriber_no
+        - usage_type
+    AddUsageResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - SUCCESS
+        usage_id:
+          type: integer
+        subscriber_no:
+          type: string
+        month:
+          type: integer
+        year:
+          type: integer
+        usage_type:
+          allOf:
+            - $ref: '#/components/schemas/UsageType'
         amount_added:
           type: integer
-          title: Amount Added
         unit:
           type: string
           enum:
-          - MINUTES
-          - MB
-          title: Unit
-      type: object
+            - MINUTES
+            - MB
       required:
-      - usage_id
-      - subscriber_no
-      - month
-      - year
-      - usage_type
-      - amount_added
-      - unit
-      title: AddUsageResponse
-    BillDetailed:
-      properties:
-        subscriber_no:
-          type: string
-          title: Subscriber No
-        month:
-          type: integer
-          title: Month
-        year:
-          type: integer
-          title: Year
-        currency:
-          type: string
-          const: USD
-          title: Currency
-          default: USD
-        total:
-          type: number
-          title: Total
-        paid_amount:
-          type: number
-          title: Paid Amount
-        remaining_balance:
-          type: number
-          title: Remaining Balance
-        status:
-          $ref: '#/components/schemas/BillStatus'
-        due_date:
-          type: string
-          format: date
-          title: Due Date
-        calculated_at:
-          type: string
-          format: date-time
-          title: Calculated At
-        usage:
-          $ref: '#/components/schemas/UsageTotals'
-        charges:
-          $ref: '#/components/schemas/ChargeBreakdown'
-        usage_items:
-          $ref: '#/components/schemas/UsageItemsPage'
-      type: object
-      required:
-      - subscriber_no
-      - month
-      - year
-      - total
-      - paid_amount
-      - remaining_balance
-      - status
-      - due_date
-      - calculated_at
-      - usage
-      - charges
-      - usage_items
-      title: BillDetailed
+        - status
+        - usage_id
+        - subscriber_no
+        - month
+        - year
+        - usage_type
+        - amount_added
+        - unit
     BillStatus:
       type: string
       enum:
-      - UNPAID
-      - PARTIAL
-      - PAID
-      title: BillStatus
+        - UNPAID
+        - PARTIAL
+        - PAID
     BillSummary:
+      type: object
       properties:
         subscriber_no:
           type: string
-          title: Subscriber No
         month:
           type: integer
-          title: Month
         year:
           type: integer
-          title: Year
         currency:
           type: string
-          const: USD
-          title: Currency
-          default: USD
+          enum:
+            - USD
         total:
           type: number
-          title: Total
+          example: 80
         paid_amount:
           type: number
-          title: Paid Amount
+          example: 30
         remaining_balance:
           type: number
-          title: Remaining Balance
+          example: 50
         status:
-          $ref: '#/components/schemas/BillStatus'
+          allOf:
+            - $ref: '#/components/schemas/BillStatus'
         due_date:
           type: string
           format: date
-          title: Due Date
-      type: object
+          example: '2026-11-15'
       required:
-      - subscriber_no
-      - month
-      - year
-      - total
-      - paid_amount
-      - remaining_balance
-      - status
-      - due_date
-      title: BillSummary
-    CalculateBillRequest:
-      properties:
-        month:
-          type: integer
-          maximum: 12.0
-          minimum: 1.0
-          title: Month
-          examples:
-          - 10
-        year:
-          type: integer
-          maximum: 2100.0
-          minimum: 2000.0
-          title: Year
-          examples:
-          - 2026
-        subscriber_no:
-          type: string
-          maxLength: 20
-          minLength: 1
-          title: Subscriber No
-          examples:
-          - '5551001'
+        - subscriber_no
+        - month
+        - year
+        - currency
+        - total
+        - paid_amount
+        - remaining_balance
+        - status
+        - due_date
+    UsageTotals:
       type: object
-      required:
-      - month
-      - year
-      - subscriber_no
-      title: CalculateBillRequest
-    CalculateBillResponse:
       properties:
-        status:
-          type: string
-          const: SUCCESS
-          title: Status
-          default: SUCCESS
-        action:
-          type: string
-          enum:
-          - CREATED
-          - UPDATED
-          title: Action
-        bill:
-          $ref: '#/components/schemas/BillSummary'
         phone_minutes:
           type: integer
-          title: Phone Minutes
         internet_mb:
           type: integer
-          title: Internet Mb
-        phone_charge:
+        internet_gb:
           type: number
-          title: Phone Charge
-        internet_charge:
-          type: number
-          title: Internet Charge
-      type: object
       required:
-      - action
-      - bill
-      - phone_minutes
-      - internet_mb
-      - phone_charge
-      - internet_charge
-      title: CalculateBillResponse
+        - phone_minutes
+        - internet_mb
+        - internet_gb
+    PhoneChargeDetail:
+      type: object
+      properties:
+        included_minutes:
+          type: integer
+        extra_minutes:
+          type: integer
+        block_minutes:
+          type: integer
+        blocks_charged:
+          type: integer
+        price_per_block:
+          type: number
+        charge:
+          type: number
+      required:
+        - included_minutes
+        - extra_minutes
+        - block_minutes
+        - blocks_charged
+        - price_per_block
+        - charge
+    InternetChargeDetail:
+      type: object
+      properties:
+        base_price:
+          type: number
+        included_gb:
+          type: integer
+        extra_mb:
+          type: integer
+        block_gb:
+          type: integer
+        blocks_charged:
+          type: integer
+        price_per_block:
+          type: number
+        charge:
+          type: number
+      required:
+        - base_price
+        - included_gb
+        - extra_mb
+        - block_gb
+        - blocks_charged
+        - price_per_block
+        - charge
     ChargeBreakdown:
+      type: object
       properties:
         phone:
           $ref: '#/components/schemas/PhoneChargeDetail'
@@ -623,318 +619,227 @@ components:
           $ref: '#/components/schemas/InternetChargeDetail'
         taxes_and_fees:
           type: number
-          title: Taxes And Fees
-          default: 0.0
-      type: object
+          example: 0
       required:
-      - phone
-      - internet
-      title: ChargeBreakdown
-    ErrorDetail:
-      properties:
-        code:
-          type: string
-          title: Code
-          examples:
-          - UNAUTHORIZED
-        message:
-          type: string
-          title: Message
-          examples:
-          - Missing or invalid bearer token.
-        details:
-          anyOf:
-          - {}
-          - type: 'null'
-          title: Details
-      type: object
-      required:
-      - code
-      - message
-      title: ErrorDetail
-    ErrorResponse:
-      properties:
-        error:
-          $ref: '#/components/schemas/ErrorDetail'
-      type: object
-      required:
-      - error
-      title: ErrorResponse
-    InternetChargeDetail:
-      properties:
-        base_price:
-          type: number
-          title: Base Price
-        included_gb:
-          type: integer
-          title: Included Gb
-        extra_mb:
-          type: integer
-          title: Extra Mb
-        block_gb:
-          type: integer
-          title: Block Gb
-        blocks_charged:
-          type: integer
-          title: Blocks Charged
-        price_per_block:
-          type: number
-          title: Price Per Block
-        charge:
-          type: number
-          title: Charge
-      type: object
-      required:
-      - base_price
-      - included_gb
-      - extra_mb
-      - block_gb
-      - blocks_charged
-      - price_per_block
-      - charge
-      title: InternetChargeDetail
-    LoginRequest:
-      properties:
-        username:
-          type: string
-          title: Username
-          examples:
-          - sub5551001
-        password:
-          type: string
-          title: Password
-          examples:
-          - sub1001-demo-pass
-      type: object
-      required:
-      - username
-      - password
-      title: LoginRequest
-    LoginResponse:
-      properties:
-        access_token:
-          type: string
-          title: Access Token
-        token_type:
-          type: string
-          const: bearer
-          title: Token Type
-          default: bearer
-        expires_in:
-          type: integer
-          title: Expires In
-        role:
-          $ref: '#/components/schemas/Role'
-        subscriber_no:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Subscriber No
-      type: object
-      required:
-      - access_token
-      - expires_in
-      - role
-      - subscriber_no
-      title: LoginResponse
-    PayBillRequest:
-      properties:
-        month:
-          type: integer
-          maximum: 12.0
-          minimum: 1.0
-          title: Month
-          examples:
-          - 10
-        year:
-          type: integer
-          maximum: 2100.0
-          minimum: 2000.0
-          title: Year
-          examples:
-          - 2026
-        subscriber_no:
-          anyOf:
-          - type: string
-            maxLength: 20
-            minLength: 1
-            examples:
-            - '5551001'
-          - type: 'null'
-          title: Subscriber No
-          description: Optional for subscribers (taken from the token); required for
-            admins.
-        amount:
-          anyOf:
-          - type: number
-            exclusiveMinimum: 0.0
-          - type: string
-          title: Amount
-          examples:
-          - 30
-        transaction_id:
-          type: string
-          maxLength: 64
-          minLength: 1
-          pattern: ^[A-Za-z0-9_.:-]+$
-          title: Transaction Id
-          description: Client-generated idempotency key. Reusing one returns 409.
-          examples:
-          - 3f6c2a9e-0b1d-4c55-9a51-2f1b8f0c7d10
-      type: object
-      required:
-      - month
-      - year
-      - amount
-      - transaction_id
-      title: PayBillRequest
-    PayBillResponse:
-      properties:
-        payment_status:
-          type: string
-          const: SUCCESS
-          title: Payment Status
-          default: SUCCESS
-        transaction_id:
-          type: string
-          title: Transaction Id
-        amount:
-          type: number
-          title: Amount
-        paid_amount:
-          type: number
-          title: Paid Amount
-        remaining_balance:
-          type: number
-          title: Remaining Balance
-        bill_status:
-          $ref: '#/components/schemas/BillStatus'
-        bill:
-          $ref: '#/components/schemas/BillSummary'
-      type: object
-      required:
-      - transaction_id
-      - amount
-      - paid_amount
-      - remaining_balance
-      - bill_status
-      - bill
-      title: PayBillResponse
-    PhoneChargeDetail:
-      properties:
-        included_minutes:
-          type: integer
-          title: Included Minutes
-        extra_minutes:
-          type: integer
-          title: Extra Minutes
-        block_minutes:
-          type: integer
-          title: Block Minutes
-        blocks_charged:
-          type: integer
-          title: Blocks Charged
-        price_per_block:
-          type: number
-          title: Price Per Block
-        charge:
-          type: number
-          title: Charge
-      type: object
-      required:
-      - included_minutes
-      - extra_minutes
-      - block_minutes
-      - blocks_charged
-      - price_per_block
-      - charge
-      title: PhoneChargeDetail
-    Role:
-      type: string
-      enum:
-      - SUBSCRIBER
-      - ADMIN
-      title: Role
+        - phone
+        - internet
+        - taxes_and_fees
     UsageItem:
+      type: object
       properties:
         id:
           type: integer
-          title: Id
         usage_type:
-          $ref: '#/components/schemas/UsageType'
+          allOf:
+            - $ref: '#/components/schemas/UsageType'
         amount:
           type: integer
-          title: Amount
         unit:
           type: string
           enum:
-          - MINUTES
-          - MB
-          title: Unit
+            - MINUTES
+            - MB
         recorded_at:
           type: string
           format: date-time
-          title: Recorded At
-      type: object
       required:
-      - id
-      - usage_type
-      - amount
-      - unit
-      - recorded_at
-      title: UsageItem
+        - id
+        - usage_type
+        - amount
+        - unit
+        - recorded_at
     UsageItemsPage:
+      type: object
       properties:
         page:
           type: integer
-          title: Page
         page_size:
           type: integer
-          title: Page Size
         total_items:
           type: integer
-          title: Total Items
         total_pages:
           type: integer
-          title: Total Pages
         items:
+          type: array
           items:
             $ref: '#/components/schemas/UsageItem'
-          type: array
-          title: Items
-      type: object
       required:
-      - page
-      - page_size
-      - total_items
-      - total_pages
-      - items
-      title: UsageItemsPage
-    UsageTotals:
+        - page
+        - page_size
+        - total_items
+        - total_pages
+        - items
+    BillDetailed:
+      type: object
       properties:
+        subscriber_no:
+          type: string
+        month:
+          type: integer
+        year:
+          type: integer
+        currency:
+          type: string
+          enum:
+            - USD
+        total:
+          type: number
+          example: 80
+        paid_amount:
+          type: number
+          example: 30
+        remaining_balance:
+          type: number
+          example: 50
+        status:
+          allOf:
+            - $ref: '#/components/schemas/BillStatus'
+        due_date:
+          type: string
+          format: date
+          example: '2026-11-15'
+        calculated_at:
+          type: string
+          format: date-time
+        usage:
+          $ref: '#/components/schemas/UsageTotals'
+        charges:
+          $ref: '#/components/schemas/ChargeBreakdown'
+        usage_items:
+          $ref: '#/components/schemas/UsageItemsPage'
+      required:
+        - subscriber_no
+        - month
+        - year
+        - currency
+        - total
+        - paid_amount
+        - remaining_balance
+        - status
+        - due_date
+        - calculated_at
+        - usage
+        - charges
+        - usage_items
+    CalculateBillRequest:
+      type: object
+      properties:
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 10
+        year:
+          type: integer
+          minimum: 2000
+          maximum: 2100
+          example: 2026
+        subscriber_no:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: '5551001'
+      required:
+        - month
+        - year
+        - subscriber_no
+    CalculateBillResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - SUCCESS
+        action:
+          type: string
+          enum:
+            - CREATED
+            - UPDATED
+        bill:
+          $ref: '#/components/schemas/BillSummary'
         phone_minutes:
           type: integer
-          title: Phone Minutes
         internet_mb:
           type: integer
-          title: Internet Mb
-        internet_gb:
+        phone_charge:
           type: number
-          title: Internet Gb
-      type: object
+        internet_charge:
+          type: number
       required:
-      - phone_minutes
-      - internet_mb
-      - internet_gb
-      title: UsageTotals
-    UsageType:
-      type: string
-      enum:
-      - PHONE
-      - INTERNET
-      title: UsageType
-  securitySchemes:
-    HTTPBearer:
-      type: http
-      description: JWT from POST /api/v1/auth/login
-      scheme: bearer
+        - status
+        - action
+        - bill
+        - phone_minutes
+        - internet_mb
+        - phone_charge
+        - internet_charge
+    PayBillRequest:
+      type: object
+      properties:
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 10
+        year:
+          type: integer
+          minimum: 2000
+          maximum: 2100
+          example: 2026
+        subscriber_no:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: Optional for subscribers (taken from the token); required for admins.
+          example: '5551001'
+          nullable: true
+        amount:
+          oneOf:
+            - type: number
+              exclusiveMinimum: true
+              minimum: 0
+            - type: string
+          example: 30
+        transaction_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: ^[A-Za-z0-9_.:-]+$
+          description: Client-generated idempotency key. Reusing one returns 409.
+          example: 3f6c2a9e-0b1d-4c55-9a51-2f1b8f0c7d10
+      required:
+        - month
+        - year
+        - amount
+        - transaction_id
+    PayBillResponse:
+      type: object
+      properties:
+        payment_status:
+          type: string
+          enum:
+            - SUCCESS
+        transaction_id:
+          type: string
+        amount:
+          type: number
+          example: 30
+        paid_amount:
+          type: number
+          example: 30
+        remaining_balance:
+          type: number
+          example: 50
+        bill_status:
+          allOf:
+            - $ref: '#/components/schemas/BillStatus'
+        bill:
+          $ref: '#/components/schemas/BillSummary'
+      required:
+        - payment_status
+        - transaction_id
+        - amount
+        - paid_amount
+        - remaining_balance
+        - bill_status
+        - bill

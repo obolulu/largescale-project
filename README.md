@@ -6,18 +6,27 @@ Work in progress. The full plan and requirement checklist are in [docs/PLAN.md](
 
 | Folder | Contents | Status |
 |---|---|---|
-| `billing-api/` | FastAPI service, SQLAlchemy models, Alembic migrations, seed script, tests | all 5 operations + JWT done; not yet run against Postgres |
-| `mcp-server/` | MCP server over `data/Mobile_Provider_Billing_Guide.md` | done: BM25 index, stdio + HTTP, 32 tests |
+| `billing-api/` | TypeScript: NestJS 11 + TypeORM on PostgreSQL, migrations, seed script, Jest tests | all 5 operations + JWT done; 86 tests pass on Postgres |
+| `mcp-server/` | TypeScript MCP server over `data/Mobile_Provider_Billing_Guide.md` | BM25 index, stdio + HTTP; 42 Vitest tests, retrieval scores identical to the Python version |
 | `agent/` | LLM agent (CLI) | not started |
 | `gateway/` | API gateway config | not started |
 
-## Run the unit tests (no database, cloud or LLM needed)
+Both services are TypeScript on Node.js 22.18+ (the Docker images use Node 24). Each is its own npm package.
+
+## Run the unit tests (no Docker, cloud or LLM needed)
 
 ```bash
 cd billing-api
-python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements-dev.txt   # Linux/macOS: .venv/bin/python
-.venv/Scripts/python -m pytest
+npm ci
+npm test
+```
+
+The API tests run against a real PostgreSQL engine. With `TEST_DATABASE_URL` unset, the test setup starts [PGlite](https://pglite.dev) (Postgres compiled to WebAssembly) in process and serves it over the Postgres wire protocol, so nothing has to be installed. To use a real server instead, for example the docker-compose `db`, set `TEST_DATABASE_URL=postgresql://billing:billing_dev_password@localhost:5432/billing_test`. Use an empty database: the tests drop and recreate the billing tables.
+
+```bash
+cd mcp-server
+npm ci
+npm test
 ```
 
 ## Run locally with Postgres (needs Docker)
@@ -26,20 +35,19 @@ python -m venv .venv
 cp .env.example .env
 docker compose up -d db
 cd billing-api
-.venv/Scripts/alembic upgrade head
-.venv/Scripts/python -m scripts.seed
-.venv/Scripts/uvicorn app.main:app --reload
+npm ci
+npm run migrate
+npm run seed            # add -- --reset to wipe and reseed
+npm run build && npm start
 ```
 
-Swagger UI: http://localhost:8000/docs · Health check: http://localhost:8000/api/v1/health
+Swagger UI: http://localhost:8000/docs · Spec: http://localhost:8000/openapi.json · Health check: http://localhost:8000/api/v1/health
 
-`docker compose up --build` runs the API in a container as well, and applies migrations on start.
-
-To run the unit tests against Postgres instead of in-memory SQLite, set `TEST_DATABASE_URL` (for example `postgresql+psycopg://billing:billing_dev_password@localhost:5432/billing_test`, an empty database the tests may wipe).
+`docker compose up --build` runs the API in a container as well, and applies migrations on start. Seed it with `docker compose exec billing-api node dist/scripts/seed.js`.
 
 ## Billing REST API (v1)
 
-Style: REST/JSON, versioned by URL prefix (`/api/v1`). Spec: [docs/openapi.yaml](docs/openapi.yaml) (regenerate with `python -m scripts.export_openapi`; a test fails if it's stale). Swagger UI at `/docs`.
+Style: REST/JSON, versioned by URL prefix (`/api/v1`). Spec: [docs/openapi.yaml](docs/openapi.yaml), generated from the controllers and DTOs by `npm run export:openapi` (a test fails if it's stale). Swagger UI at `/docs`.
 
 | Operation | Method and path | Auth | Paging |
 |---|---|---|---|
@@ -69,6 +77,8 @@ Every error has the body `{"error": {"code": "...", "message": "...", "details":
 | 422 | `AMOUNT_EXCEEDS_BALANCE` | payment above the remaining balance (`details.remaining_balance`) |
 | 422 | `VALIDATION_ERROR` | bad or missing fields (`details` lists them) |
 
+For `VALIDATION_ERROR`, `details` is a list of `{"field", "message"}` entries, one per invalid field, for example `{"field": "month", "message": "Input should be less than or equal to 12"}`. Malformed JSON is a 422 too. A missing or invalid token is checked before the request body, so an anonymous request with a bad body gets 401, not 422.
+
 Example, a protected route with no token:
 
 ```http
@@ -81,7 +91,7 @@ WWW-Authenticate: Bearer
 
 ## MCP server (billing documentation)
 
-Built with the official MCP Python SDK (`mcp` 2.x, `MCPServer`). It exposes one tool over the policy guide. The guide is documentation only; live bills and usage come from the REST API.
+Built with the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, `McpServer`). It exposes one tool over the policy guide. The guide is documentation only; live bills and usage come from the REST API.
 
 **Tool `search_billing_documentation`**
 
@@ -121,16 +131,16 @@ Output (structured content, also sent as JSON text), following the shape the gui
 
 ```bash
 cd mcp-server
-python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements-dev.txt
-.venv/Scripts/python -m billing_docs.server                       # stdio, for an agent that spawns it
-.venv/Scripts/python -m billing_docs.server --transport http --host 0.0.0.0 --port 8001   # http://host:8001/mcp
-.venv/Scripts/python -m pytest
+npm ci
+npm run build
+npm start                                                     # stdio, for an agent that spawns it
+npm start -- --transport http --host 0.0.0.0 --port 8001      # http://host:8001/mcp
+npm test
 ```
 
 HTTP mode also serves `GET /health`. The Docker image runs HTTP mode on port 8001.
 
-**Three retrieval tests:** [docs/mcp_retrieval_tests.md](docs/mcp_retrieval_tests.md), generated by `python scripts/retrieval_demo.py --write` over a real MCP transport (add `--url http://host:8001/mcp` to run against a deployed server).
+**Three retrieval tests:** [docs/mcp_retrieval_tests.md](docs/mcp_retrieval_tests.md), generated by `npm run demo -- --write` over a real MCP transport (add `--url http://host:8001/mcp` to run against a deployed server).
 
 | Query | Top result | Also returned |
 |---|---|---|
@@ -143,7 +153,7 @@ HTTP mode also serves `GET /health`. The Docker image runs HTTP mode on port 800
 - Pricing follows guide §4.2 exactly, using integer MB arithmetic (1 GB = 1,000 MB). The $50 internet base is charged even with zero usage (§3.1). There are no taxes or fees (§4.2).
 - The brief's sample "Apr 2025 → $75" can't come from these rules (totals move in $10 steps from $50), so it's treated as an illustration of the response shape only.
 - Add Usage records one 10-minute or 1 MB event per call. The seed script inserts batched usage rows (50 min / 500 MB) so demo months stay small. Bill totals are the same either way.
-- Seed logins are test-only credentials and are listed in `billing-api/scripts/seed.py`.
+- Seed logins are test-only credentials and are listed in `billing-api/scripts/seed.ts`.
 - Bills are stored snapshots. Usage added after Calculate Bill isn't billed until Calculate Bill runs again for that period.
 - Recalculating a bill updates its charges and keeps payments already made. If the new total is below the amount paid, the remaining balance is shown as 0 and the bill is PAID. There's no credit or refund logic (guide §7.3 leaves that to customer support).
 - Calculate Bill works for any valid period, including one with no usage ($50, per §3.1).
@@ -151,4 +161,7 @@ HTTP mode also serves `GET /health`. The Docker image runs HTTP mode on port 800
 - Query Bill is unauthenticated because the spec says so. It returns only totals and status, no usage details. The agent will always fill `subscriber_no` from the logged-in user's token, never from the prompt.
 - Money is stored as `NUMERIC(10,2)` and returned as a JSON number in USD. `due_date` is 15 days after the end of the billing month (§6.1).
 - The MCP server has no authentication: it serves only the public policy guide, never subscriber data. Account data stays behind the JWT-protected REST API.
-- Unit tests run on in-memory SQLite for portability. The application itself requires Postgres (SQLite doesn't meet the server-database requirement).
+- The API tests run on PostgreSQL: in-process PGlite by default, or any server named by `TEST_DATABASE_URL`. SQLite isn't used anywhere (it doesn't meet the server-database requirement).
+- Money is integer cents in code, so there is no floating-point rounding. Payment amounts may be sent as a JSON number or a string (`30`, `"29.50"`).
+- Unlike the earlier FastAPI version, a trailing slash (`/api/v1/bills/`) reaches the same route instead of redirecting, and a wrong HTTP method on a known path returns 404 rather than 405.
+- `DATABASE_URL` uses the `postgresql://` scheme. The older SQLAlchemy form `postgresql+psycopg://` is still accepted.

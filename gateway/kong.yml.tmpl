@@ -1,0 +1,106 @@
+# Kong declarative (DB-less) config for the billing API gateway.
+#
+# This is a template: render-config.sh fills the __PLACEHOLDERS__ from
+# environment variables when the container starts, so the JWT secret never
+# lives in git or in the image.
+#
+# Two Kong services point at the same backend. Routes on `billing-public` pass
+# straight through; routes on `billing-protected` need a valid JWT first. The
+# backend checks the token again (defence in depth), and it is the backend that
+# enforces roles and "own subscriber only".
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: billing-public
+    url: __BILLING_API_UPSTREAM__
+    connect_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
+    # Never let the gateway replay a request on its own. Pay Bill retries are the
+    # agent's job, with the same transaction_id (guide §5.3).
+    retries: 0
+    routes:
+      - name: health
+        methods: [GET]
+        paths: ['~/api/v1/health/?$']
+        strip_path: false
+      - name: auth-login
+        methods: [POST]
+        paths: ['~/api/v1/auth/login/?$']
+        strip_path: false
+      - name: query-bill
+        # Public by spec. Only totals and status, no usage details.
+        methods: [GET]
+        paths: ['~/api/v1/bills/?$']
+        strip_path: false
+      - name: api-docs
+        methods: [GET]
+        paths: ['~/docs(/.*)?$', '~/openapi\.(json|yaml)$']
+        strip_path: false
+
+  - name: billing-protected
+    url: __BILLING_API_UPSTREAM__
+    connect_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
+    retries: 0
+    routes:
+      - name: query-bill-detailed
+        methods: [GET]
+        paths: ['~/api/v1/bills/detailed/?$']
+        strip_path: false
+      - name: calculate-bill
+        methods: [POST]
+        paths: ['~/api/v1/bills/calculate/?$']
+        strip_path: false
+      - name: pay-bill
+        methods: [POST]
+        paths: ['~/api/v1/payments/?$']
+        strip_path: false
+      - name: add-usage
+        methods: [POST]
+        paths: ['~/api/v1/usage/?$']
+        strip_path: false
+    plugins:
+      # Signature (HS256 with the shared secret), issuer and expiry.
+      # The consumer below is looked up by the token's `iss` claim.
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify: [exp]
+          header_names: [authorization]
+          # Tokens only in the Authorization header, never in URLs or cookies.
+          uri_param_names: []
+          cookie_names: []
+          secret_is_base64: false
+          run_on_preflight: true
+      # The OSS jwt plugin has no audience check, so this runs right after it
+      # (post-function runs late in the access phase) and checks `aud`.
+      - name: post-function
+        config:
+          access:
+            - |
+              local expected = "__JWT_AUDIENCE__"
+              local token = kong.ctx.shared.authenticated_jwt_token
+              local parsed = token and require("kong.plugins.jwt.jwt_parser"):new(token)
+              local aud = parsed and parsed.claims and parsed.claims.aud
+              local ok = aud == expected
+              if type(aud) == "table" then
+                for _, value in ipairs(aud) do
+                  if value == expected then ok = true end
+                end
+              end
+              if not ok then
+                return kong.response.exit(401, { message = "Invalid audience" },
+                  { ["WWW-Authenticate"] = 'Bearer error="invalid_token"' })
+              end
+
+consumers:
+  # Stands for "whoever billing-api issued a token to". Per-user identity stays
+  # in the token's sub / subscriber_no claims, which the backend reads.
+  - username: billing-api-tokens
+    jwt_secrets:
+      - key: __JWT_ISSUER__
+        algorithm: HS256
+        secret: '__JWT_SECRET__'

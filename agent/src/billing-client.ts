@@ -9,13 +9,18 @@ export interface Session {
 
 export type Json = Record<string, unknown>;
 
-/** A non-2xx answer from the API. `body` is the API's `{"error": {...}}` object when it sent one. */
+/**
+ * A non-2xx answer. `body` is the API's `{"error": {...}}` object when the API sent it,
+ * or the gateway's `{"message": "..."}` when the gateway refused the call itself.
+ */
 export class BillingApiError extends Error {
   readonly status: number;
   readonly body: unknown;
   constructor(status: number, body: unknown) {
-    const err = (body as { error?: { code?: string; message?: string } } | null)?.error;
-    super(`HTTP ${status}${err?.code ? ` ${err.code}` : ""}${err?.message ? `: ${err.message}` : ""}`);
+    const b = body as { error?: { code?: string; message?: string }; message?: string } | null;
+    const code = b?.error?.code;
+    const message = b?.error?.message ?? (typeof b?.message === "string" ? b.message : undefined);
+    super(`HTTP ${status}${code ? ` ${code}` : ""}${message ? `: ${message}` : ""}`);
     this.name = "BillingApiError";
     this.status = status;
     this.body = body;

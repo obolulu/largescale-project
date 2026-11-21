@@ -35,7 +35,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | DB | PostgreSQL (TypeORM, hand-written SQL migrations) | SQLite isn't allowed |
 | MCP | Official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, `McpServer`) + a small built-in BM25 index | Counts as a "real MCP SDK server", and full-text search is enough |
 | Agent | TypeScript CLI on the Anthropic SDK (`@anthropic-ai/sdk`), a hand-written tool loop; Claude Opus 5.5 at low effort by default, any model via `AGENT_MODEL` | The brief asks for low cost, and the cost must be documented: each turn logs its token usage and estimated cost |
-| Gateway | Azure API Management (Consumption tier) or Kong | Both are named in the brief |
+| Gateway | Kong Gateway 3.9 OSS, DB-less (declarative config) | Named in the brief; free, runs the same in docker-compose and on Azure Container Apps, and can be tested locally (APIM can't) |
 | Cloud | Azure for Students (Container Apps + Azure Database for PostgreSQL Flexible) | Deploying locally costs points |
 | Tests | Jest + supertest (API) on Postgres via in-process PGlite or `TEST_DATABASE_URL`; Vitest (MCP); LLM mocked | Tests must run without the cloud or a live LLM |
 
@@ -75,9 +75,11 @@ The LLM never calls backend services directly. The agent runs every tool call.
 
 ## 4. Data model (ER diagram)
 
+The implemented schema, with constraints, is drawn as a Mermaid ER diagram in the README ("Data model (ER diagram)").
+
 - `users` (id, username, password_hash, role: SUBSCRIBER/ADMIN, subscriber_no)
 - `subscribers` (subscriber_no PK, name, plan)
-- `usage_records` (id, subscriber_no FK, year, month, type PHONE/INTERNET, amount, created_at). Raw records make detailed paging possible. Add Usage always writes 10 min / 1 MB. The seed script writes larger batched records (for example 500 MB) so a 35 GB month doesn't need 35,000 rows. Document this.
+- `usage_records` (id, subscriber_no FK, year, month, usage_type PHONE/INTERNET, amount, created_at). Raw records make detailed paging possible. Add Usage always writes 10 min / 1 MB. The seed script writes larger batched records (for example 500 MB) so a 35 GB month doesn't need 35,000 rows. Document this.
 - `bills` (id, subscriber_no FK, year, month, phone_minutes, internet_mb, phone_charge, internet_charge, total, paid_amount, status, UNIQUE(subscriber_no, year, month))
 - `payments` (id, bill_id FK, transaction_id UNIQUE, amount, created_at)
 
@@ -136,15 +138,17 @@ The LLM never calls backend services directly. The agent runs every tool call.
 
 ## 8. API Gateway (10 pts)
 
-- [ ] Public routes, each mapped to the backend:
+Built with Kong 3.9 OSS, DB-less (`gateway/`). Details and the route table are in the README ("API gateway (Kong)").
+
+- [x] Public routes, each mapped to the backend:
   - `/api/v1/bills`
   - `/api/v1/bills/detailed`
   - `/api/v1/bills/calculate`
   - `/api/v1/payments`
   - `/api/v1/usage`
-- [ ] JWT validation at the gateway (APIM `validate-jwt` policy or the Kong JWT plugin) and again in the API.
-- [ ] Document the gateway URL, a route-mapping table and one error response (for example a 401 with no token).
-- [ ] Group 2 has no rate limit in the spec. Adding a light one is optional; document it if added.
+- [x] JWT validation at the gateway (Kong `jwt` plugin: signature, `iss`, `exp`; a `post-function` checks `aud`) and again in the API. 24 integration tests in `gateway/test/` pass against the docker-compose stack.
+- [~] Document the gateway URL, a route-mapping table and one error response (for example a 401 with no token). Route table and 401 example done; the cloud URL comes with Phase 2b.
+- [x] Group 2 has no rate limit in the spec. None added (stated in the README).
 
 ---
 
@@ -168,7 +172,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [ ] |
 | 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [x] migrations and seed run on Postgres (PGlite); Docker image not yet built |
 | 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [x] ported to NestJS; 86 tests pass on Postgres |
-| 2b | **Cloud skeleton:** API container on Azure Container Apps behind APIM, with one public and one JWT-protected route | 0.5 day | [ ] |
+| 2b | **Cloud skeleton:** API and Kong gateway containers on Azure Container Apps, with one public and one JWT-protected route | 0.5 day | [ ] |
 | 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; screenshot still to do |
 | 4 | MCP server + index + three retrieval tests | 1 day | [x] ported to the TypeScript SDK |
 | 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [~] built; 48 tests pass with a mocked LLM; live-LLM run and saved traces still to do |
@@ -196,7 +200,7 @@ Logins (test values only, also in `billing-api/scripts/seed.ts`): `admin`, `sub5
 billing-api/       NestJS app: src/ (api, auth, billing, pricing, database), scripts/, test/
 mcp-server/        src/indexer.ts, src/server.ts, data/Mobile_Provider_Billing_Guide.md, test/
 agent/             agent, tools, confirmation, trace logging, tests (mock LLM)
-gateway/           APIM policy XML or kong.yml
+gateway/           kong.yml.tmpl (Kong DB-less), Dockerfile, render-config.sh, integration tests
 docs/              PLAN.md, billing guide, ER diagram, openapi.yaml, screenshots, tool traces
 docker-compose.yml
 README.md
@@ -206,10 +210,10 @@ README.md
 
 ## 12. README checklist (all of it goes in the README, nothing in Moodle)
 
-- [ ] Architecture diagram, stack, and the API style chosen
-- [ ] Gateway URL, route mappings, a protected route example, an error response example
+- [x] Architecture diagram, stack, and the API style chosen
+- [~] Gateway URL, route mappings, a protected route example, an error response example (all but the cloud URL)
 - [x] Swagger link + `openapi.yaml`
-- [ ] ER diagram
+- [x] ER diagram
 - [x] MCP tool schema and how the indexing works
 - [ ] Cloud URLs and deployment steps
 - [ ] How to run the tests + a screenshot of the output

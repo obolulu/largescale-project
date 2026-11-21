@@ -1,0 +1,13 @@
+{
+  "name": "billing-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kong API gateway config for the billing API, plus integration tests against a running stack",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

@@ -2,6 +2,25 @@
 
 Work in progress. The full plan and requirement checklist are in [docs/PLAN.md](docs/PLAN.md). The policy document is [docs/Mobile_Provider_Billing_Guide.md](docs/Mobile_Provider_Billing_Guide.md).
 
+## Architecture
+
+```mermaid
+flowchart LR
+    user([Subscriber]) -->|chat in the terminal| agent
+    agent["agent/ CLI<br/>tool loop, payment confirmation, tool trace"]
+    agent <-->|"Messages API: tools, tool calls, results"| llm["Claude API<br/>(Anthropic)"]
+    agent -->|"MCP: stdio, or Streamable HTTP at /mcp"| mcp["mcp-server<br/>search_billing_documentation"]
+    mcp --> index["BM25 index of the billing guide<br/>built once at startup"]
+    agent -->|"HTTPS + JWT"| gw["gateway/ Kong (DB-less)<br/>route mapping, JWT check"]
+    gw --> api["billing-api<br/>NestJS REST, /api/v1, Swagger at /docs"]
+    api --> db[("PostgreSQL")]
+```
+
+- The LLM never calls a service. It only chooses tools; the agent runs every call, policy questions through the MCP server and account data through the REST API, and sends the results back for the final answer.
+- **API style:** REST with JSON bodies, versioned by URL prefix (`/api/v1`), JWT bearer auth on the protected operations. Details in [Billing REST API (v1)](#billing-rest-api-v1).
+- **Stack:** TypeScript on Node.js throughout. NestJS 11 + TypeORM on PostgreSQL for the API, the official MCP TypeScript SDK for the documentation server, and the Anthropic TypeScript SDK for the agent.
+- Every REST call, the agent's included, goes through the gateway. It checks the JWT before a protected call reaches the API, and the API checks it again. Details in [API gateway](#api-gateway-kong).
+
 ## Layout
 
 | Folder | Contents | Status |
@@ -9,9 +28,9 @@ Work in progress. The full plan and requirement checklist are in [docs/PLAN.md](
 | `billing-api/` | TypeScript: NestJS 11 + TypeORM on PostgreSQL, migrations, seed script, Jest tests | all 5 operations + JWT done; 86 tests pass on Postgres |
 | `mcp-server/` | TypeScript MCP server over `data/Mobile_Provider_Billing_Guide.md` | BM25 index, stdio + HTTP; 42 Vitest tests, retrieval scores identical to the Python version |
 | `agent/` | TypeScript CLI agent: Claude tool calling over the REST API and the MCP server | loop, payment confirmation and tool trace done; 48 Vitest tests with a mocked LLM; not yet run against the live LLM |
-| `gateway/` | API gateway config | not started |
+| `gateway/` | Kong 3.9 (OSS, DB-less) declarative config, Docker image, integration tests | route mapping + JWT validation done; 24 integration tests pass against the docker-compose stack; not deployed yet |
 
-All three are TypeScript on Node.js 22.18+ (the Docker images use Node 24). Each is its own npm package.
+The three services are TypeScript on Node.js 22.18+ (the Docker images use Node 24). Each is its own npm package.
 
 ## Run the unit tests (no Docker, cloud or LLM needed)
 
@@ -51,7 +70,14 @@ npm run build && npm start
 
 Swagger UI: http://localhost:8000/docs · Spec: http://localhost:8000/openapi.json · Health check: http://localhost:8000/api/v1/health
 
-`docker compose up --build` runs the API in a container as well, and applies migrations on start. Seed it with `docker compose exec billing-api node dist/scripts/seed.js`.
+**Whole stack in containers** (Postgres, API, MCP server, gateway):
+
+```bash
+docker compose up -d --build
+docker compose exec billing-api node dist/scripts/seed.js
+```
+
+The API applies migrations on start. In this mode the API isn't published to the host; use the gateway at http://localhost:8080 (Swagger at http://localhost:8080/docs). The MCP server is at http://localhost:8001/mcp.
 
 ## Billing REST API (v1)
 
@@ -95,6 +121,128 @@ GET /api/v1/bills/detailed?month=10&year=2026
 HTTP/1.1 401 Unauthorized
 WWW-Authenticate: Bearer
 {"error": {"code": "UNAUTHORIZED", "message": "Missing or invalid bearer token."}}
+```
+
+### Data model (ER diagram)
+
+PostgreSQL schema from [the initial migration](billing-api/src/database/migrations/1763510400000-InitialSchema.ts). Usage is stored as raw records so Query Bill Detailed can page through them; a bill is a stored snapshot of one subscriber's month, and payments hang off the bill.
+
+```mermaid
+erDiagram
+    subscribers |o--o{ users : "logs in as"
+    subscribers ||--o{ usage_records : "has"
+    subscribers ||--o{ bills : "is billed"
+    bills ||--o{ payments : "is paid by"
+
+    subscribers {
+        varchar subscriber_no PK
+        varchar name
+        varchar plan
+        timestamptz created_at
+    }
+    users {
+        serial id PK
+        varchar username UK
+        varchar password_hash "bcrypt"
+        user_role role "SUBSCRIBER or ADMIN"
+        varchar subscriber_no FK "NULL only for ADMIN"
+    }
+    usage_records {
+        serial id PK
+        varchar subscriber_no FK
+        int year
+        int month "1-12"
+        usage_type usage_type "PHONE or INTERNET"
+        int amount "minutes or MB, above 0"
+        timestamptz created_at
+    }
+    bills {
+        serial id PK
+        varchar subscriber_no FK "UNIQUE with year and month"
+        int year
+        int month "1-12"
+        int phone_minutes
+        int internet_mb
+        numeric phone_charge "NUMERIC(10,2)"
+        numeric internet_charge "NUMERIC(10,2)"
+        numeric total "NUMERIC(10,2)"
+        numeric paid_amount "NUMERIC(10,2), 0 or more"
+        bill_status status "UNPAID, PARTIAL or PAID"
+        timestamptz calculated_at
+    }
+    payments {
+        serial id PK
+        int bill_id FK
+        varchar transaction_id UK "idempotency key"
+        numeric amount "NUMERIC(10,2), above 0"
+        timestamptz created_at
+    }
+```
+
+- `bills (subscriber_no, year, month)` is unique: one bill per subscriber and month. Calculate Bill updates it in place and keeps `paid_amount`.
+- `payments.transaction_id` is unique, which is what makes a repeated Pay Bill a 409 that records nothing.
+- `usage_records` has an index on `(subscriber_no, year, month)` for Calculate Bill's sums and the detailed paging.
+- A check constraint makes every SUBSCRIBER user point at a subscriber; ADMIN users have none.
+
+## API gateway (Kong)
+
+[Kong Gateway](https://developer.konghq.com/gateway/) 3.9 (open source), DB-less: the whole configuration is one declarative file, [gateway/kong.yml.tmpl](gateway/kong.yml.tmpl), and there is no Admin API at runtime. At container start, [gateway/render-config.sh](gateway/render-config.sh) fills in the backend URL and the JWT secret from environment variables, so neither is in git or in the image.
+
+**Route mapping.** Paths are forwarded unchanged. Each route is an anchored regex for one method, so look-alikes such as `/api/v1/billsx` and unmapped paths get the gateway's 404 and never reach the API.
+
+| Gateway route (method + path) | Kong route | Backend | JWT at gateway |
+|---|---|---|---|
+| `GET /api/v1/health` | `health` | `billing-api` `/api/v1/health` | – |
+| `POST /api/v1/auth/login` | `auth-login` | `/api/v1/auth/login` | – |
+| `GET /api/v1/bills` | `query-bill` | `/api/v1/bills` | – (public by spec) |
+| `GET /api/v1/bills/detailed` | `query-bill-detailed` | `/api/v1/bills/detailed` | **yes** |
+| `POST /api/v1/bills/calculate` | `calculate-bill` | `/api/v1/bills/calculate` | **yes** |
+| `POST /api/v1/payments` | `pay-bill` | `/api/v1/payments` | **yes** |
+| `POST /api/v1/usage` | `add-usage` | `/api/v1/usage` | **yes** |
+| `GET /docs`, `/openapi.json`, `/openapi.yaml` | `api-docs` | Swagger UI and spec | – |
+
+**JWT validation.** The protected routes sit on their own Kong service with the bundled `jwt` plugin. It checks the HS256 signature against the secret the API signs with, looks the issuer up through the `iss` claim (`billing-api`), and rejects expired tokens. The OSS plugin has no audience check, so a short `post-function` right after it requires `aud = billing-clients`. Tokens are read only from the `Authorization: Bearer` header, never from a query string or cookie. The API then validates the token again and enforces roles and the own-subscriber rule, so the gateway decides whether a token is genuine and the API decides what it is allowed to do.
+
+Other settings: the gateway never retries a request on its own (`retries: 0`), so a Pay Bill can't be replayed behind the agent's back. Retries stay with the agent and reuse the same `transaction_id`. The `Server` version header is off, and every response carries an `X-Kong-Request-Id`. There's no rate limit, because Group 2's spec has none.
+
+**Gateway URL.** Locally it's `http://localhost:8080` (docker compose). Cloud URL: not deployed yet.
+
+**Protected route through the gateway.** The first request below has no token, and Kong answers it itself (`X-Kong-Response-Latency`, no upstream). The second has a login token and is proxied (`X-Kong-Upstream-Latency`).
+
+```http
+GET /api/v1/bills/detailed?month=10&year=2026
+
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+X-Kong-Response-Latency: 1
+X-Kong-Request-Id: 92de8e732c8c9324710c570a5f98df20
+{"message":"Unauthorized"}
+```
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"username":"sub5551001","password":"sub1001-demo-pass"}' | jq -r .access_token)
+curl -s "http://localhost:8080/api/v1/bills/detailed?month=10&year=2026" -H "Authorization: Bearer $TOKEN"
+```
+
+Errors the gateway produces itself are Kong's bodies, not the API's `{"error": ...}` shape. A missing token gives `{"message":"Unauthorized"}`, a bad signature `{"message":"Invalid signature"}`, an unknown issuer `{"message":"No credentials found for given 'iss'"}`, an expired token `{"exp":"token expired"}`, a wrong audience `{"message":"Invalid audience"}`, and an unmapped path is a 404 with `{"message":"no Route matched with those values"}`. The agent passes these to the LLM as they are.
+
+**Settings** (container environment):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JWT_SECRET` | – (required) | the same secret as `billing-api`; the container refuses to start without it |
+| `BILLING_API_UPSTREAM` | `http://billing-api:8000` | backend origin; `http://host.docker.internal:8000` for an API started with `npm start` |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | `billing-api` / `billing-clients` | expected `iss` / `aud` |
+
+Proxy on port 8080, health (`GET /status`) on 8100.
+
+**Tests.** [gateway/test/gateway.test.mjs](gateway/test/gateway.test.mjs) (Node's built-in test runner, no dependencies) runs against the running, seeded stack. It covers the public routes; a 401 from the gateway for every protected route without a token, and for a forged signature, `alg: none`, an expired token, a wrong issuer, a wrong audience, and a token in the URL; valid tokens reaching the API, which still returns its own 403 for another subscriber's data and for a subscriber calling an admin route; and unmapped paths, look-alikes and wrong methods getting a 404. None of the tests change billing data.
+
+```bash
+docker compose up -d --build
+docker compose exec billing-api node dist/scripts/seed.js
+cd gateway && npm test            # GATEWAY_URL=... to test a deployed gateway
 ```
 
 ## MCP server (billing documentation)
@@ -190,7 +338,7 @@ npm run dev -- -u sub5551001 -m "Pay my bill"         # one question; the paymen
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BILLING_API_URL` | `http://localhost:8000` | API origin; in the cloud, the gateway URL |
+| `BILLING_API_URL` | `http://localhost:8080` | the API gateway; `http://localhost:8000` talks to an API started with `npm start` directly |
 | `MCP_SERVER_URL` | unset | e.g. `http://host:8001/mcp`; unset spawns `../mcp-server/dist/main.js` over stdio |
 | `AGENT_MODEL` / `AGENT_EFFORT` | `claude-opus-5-5` / `low` | Claude model and effort |
 | `AGENT_TRACE_DIR` | `agent/traces` | where session traces are written |

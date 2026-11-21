@@ -37,7 +37,7 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const maxTokens = Number(env.AGENT_MAX_TOKENS ?? 16000);
   if (!Number.isInteger(maxTokens) || maxTokens < 1) throw new Error("AGENT_MAX_TOKENS must be a positive integer");
   return {
-    apiBaseUrl: (env.BILLING_API_URL ?? "http://localhost:8000").replace(/\/+$/, ""),
+    apiBaseUrl: (env.BILLING_API_URL ?? "http://localhost:8080").replace(/\/+$/, ""),
     mcpServerUrl: env.MCP_SERVER_URL || undefined,
     mcpServerScript: env.MCP_SERVER_SCRIPT ?? resolve(PACKAGE_ROOT, "..", "mcp-server", "dist", "main.js"),
     model: env.AGENT_MODEL ?? "claude-opus-5-5",

@@ -20,11 +20,28 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-billing}:${POSTGRES_PASSWORD:-billing_dev_password}@db:5432/${POSTGRES_DB:-billing}
       JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-in-cloud-0001}
-    ports:
-      - "8000:8000"
+    # Not published to the host: every REST call goes through the gateway.
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
+
+  gateway:
+    build: ./gateway
+    environment:
+      BILLING_API_UPSTREAM: http://billing-api:8000
+      # Must match billing-api's secret: the gateway verifies the same HS256 tokens.
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-in-cloud-0001}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - billing-api
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   mcp-server:
     build: ./mcp-server

@@ -1,0 +1,4 @@
+# Files that run inside Linux containers must keep LF endings on Windows checkouts.
+*.sh text eol=lf
+gateway/kong.yml.tmpl text eol=lf
+Dockerfile text eol=lf

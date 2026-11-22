@@ -1,0 +1,46 @@
+{
+  "session_started_at": "2026-11-22T14:56:28.204Z",
+  "username": "sub5551001",
+  "subscriber_no": "5551001",
+  "model": "claude-haiku-5-5",
+  "turns": [
+    {
+      "turn": 1,
+      "started_at": "2026-11-22T14:56:28.207Z",
+      "user_message": "What is my October bill?",
+      "llm_requests": 2,
+      "tool_calls": [
+        {
+          "id": "toolu_01SqQzHFCj118dfgG9PQsX3D",
+          "name": "query_bill",
+          "input": {
+            "month": 10,
+            "year": 2026
+          },
+          "result": {
+            "subscriber_no": "5551001",
+            "month": 10,
+            "year": 2026,
+            "currency": "USD",
+            "total": 80,
+            "paid_amount": 0,
+            "remaining_balance": 80,
+            "status": "UNPAID",
+            "due_date": "2026-11-15"
+          },
+          "is_error": false,
+          "duration_ms": 74
+        }
+      ],
+      "final_answer": "Your October 2026 bill is **$80.00**. Nothing has been paid yet, so the remaining balance is **$80.00**. The status is UNPAID, and the due date was **2026-11-15**, which has already passed.\n\nIf you want to pay it, tell me, and I can submit the payment for you.",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 208,
+        "cache_creation_input_tokens": 2173,
+        "cache_read_input_tokens": 1978
+      },
+      "estimated_cost_usd": 0.000396
+    }
+  ]
+}

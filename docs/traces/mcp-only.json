@@ -1,0 +1,66 @@
+{
+  "session_started_at": "2026-11-22T14:56:21.525Z",
+  "username": "sub5551001",
+  "subscriber_no": "5551001",
+  "model": "claude-haiku-5-5",
+  "turns": [
+    {
+      "turn": 1,
+      "started_at": "2026-11-22T14:56:21.530Z",
+      "user_message": "How much does extra internet cost?",
+      "llm_requests": 2,
+      "tool_calls": [
+        {
+          "id": "toolu_01XLtP3Ed5WtXS6dbuP8ipzF",
+          "name": "search_billing_documentation",
+          "input": {
+            "query": "extra internet cost additional internet blocks price",
+            "max_results": 3
+          },
+          "result": {
+            "document": "Mobile_Provider_Billing_Guide.md",
+            "document_id": "MOB-BILLING-2026-01",
+            "query": "extra internet cost additional internet blocks price",
+            "matches": [
+              {
+                "section": "8.1",
+                "heading": "What is the cost of extra internet?",
+                "parent_heading": "Frequently asked questions",
+                "reference": "§8.1 What is the cost of extra internet?",
+                "text": "Each additional 10 GB block beyond 20 GB costs $10. Partially used blocks are rounded up. See Section 3.2.",
+                "score": 11.45
+              },
+              {
+                "section": "3.2",
+                "heading": "Additional internet blocks",
+                "parent_heading": "Internet pricing",
+                "reference": "§3.2 Additional internet blocks",
+                "text": "Each additional 10 GB block costs $10. A partially used additional block is charged as a full block. For example, 20 GB costs $50; 21 GB costs $60; 30 GB costs $60; 35 GB costs $70.",
+                "score": 11.432
+              },
+              {
+                "section": "2.2",
+                "heading": "Additional minutes",
+                "parent_heading": "Phone call pricing",
+                "reference": "§2.2 Additional minutes",
+                "text": "Each additional 1,000-minute block costs $10. A partially used additional block is charged as a full block. For example, 1,001 minutes costs $10 in phone charges; 2,001 minutes costs $20.",
+                "score": 9.548
+              }
+            ]
+          },
+          "is_error": false,
+          "duration_ms": 78
+        }
+      ],
+      "final_answer": "Extra internet costs $10.00 for each additional 10 GB block beyond your 20 GB included allowance. A partially used block is charged as a full block. For example, 21 GB costs $60.00 in total for internet, and 30 GB also costs $60.00. (§3.2 Additional internet blocks, §8.1 What is the cost of extra internet?)",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 206,
+        "cache_creation_input_tokens": 2524,
+        "cache_read_input_tokens": 1981
+      },
+      "estimated_cost_usd": 0.000439
+    }
+  ]
+}

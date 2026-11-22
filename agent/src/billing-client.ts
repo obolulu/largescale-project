@@ -42,7 +42,7 @@ export class BillingApiClient implements BillingApi {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
-  constructor(baseUrl: string, fetchImpl: typeof fetch = fetch, timeoutMs = 15_000) {
+  constructor(baseUrl: string, fetchImpl: typeof fetch = fetch, timeoutMs = 60_000) {
     this.baseUrl = baseUrl;
     this.fetchImpl = fetchImpl;
     this.timeoutMs = timeoutMs;

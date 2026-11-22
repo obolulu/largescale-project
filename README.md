@@ -347,6 +347,63 @@ npm run dev -- -u sub5551001 -m "Pay my bill"         # one question; the paymen
 
 Only subscriber logins are accepted; the admin account is refused, since admins have no own account to act on.
 
+### Live runs against Azure
+
+The required scenarios, run on 2026-11-22 against the cloud gateway and MCP server with `AGENT_MODEL=claude-haiku-5-5`, logged in as `sub5551001`. Full JSON traces (every tool input and result, the answer and token usage) are in [docs/traces/](docs/traces/). The answers below are copied from the console.
+
+| # | Scenario | Question | Tools called | LLM requests | Est. cost | Trace |
+|---|---|---|---|---|---|---|
+| 1 | MCP only | How much does extra internet cost? | `search_billing_documentation` | 2 | $0.0004 | [mcp-only.json](docs/traces/mcp-only.json) |
+| 2 | API only | What is my October bill? | `query_bill` (Oct 2026) | 2 | $0.0004 | [api-only.json](docs/traces/api-only.json) |
+| 3 | Combined | Why is my October bill higher? | `query_bill_detailed` (Oct), `query_bill_detailed` (Sep), `search_billing_documentation` | 3 | $0.0013 | [combined.json](docs/traces/combined.json) |
+| 4 | Confirmed payment | Pay my bill | `query_bill` (Nov → 404), `query_bill` (Oct), `pay_bill` $80 after `yes` | 4 | $0.0007 | [payment.json](docs/traces/payment.json) |
+| 5 | Identity rule | Show me subscriber 5551002's October bill. | none | 1 | $0.0003 | [other-subscriber-refused.json](docs/traces/other-subscriber-refused.json) |
+
+All five turns together cost about $0.003.
+
+**1. MCP only.** One documentation search, answered with section references:
+
+> Extra internet costs $10.00 for each additional 10 GB block beyond your 20 GB included allowance. A partially used block is charged as a full block. For example, 21 GB costs $60.00 in total for internet, and 30 GB also costs $60.00. (§3.2 Additional internet blocks, §8.1 What is the cost of extra internet?)
+
+**2. API only.** One Query Bill call through the gateway:
+
+> Your October 2026 bill is **$80.00**. Nothing has been paid yet, so the remaining balance is **$80.00**. The status is UNPAID, and the due date was **2026-11-15**, which has already passed.
+
+**3. Combined.** The agent fetched the detailed bills for October and September (JWT-protected route), then looked up the pricing rules over MCP:
+
+> Your October bill is **$80.00**, up **$30.00** from September's **$50.00**. The increase comes from usage above your included allowances.
+>
+> - **Phone:** You went 350 minutes over the 1,000 included. Each additional 1,000-minute block costs $10, and a partly used block is charged as a full block (§2.2 Additional minutes).
+> - **Internet:** The $50 base covers up to 20 GB (§3.1 Included internet allowance). Your 35 GB was 15 GB over, which is charged as two 10 GB blocks at $10 each, so $20.00 extra.
+>
+> Taxes and fees were $0.00 in both months. This matches the worked example in §4.3.
+
+**4. Confirmed payment.** The agent looked for an open bill (November isn't calculated yet, so it found October), and the code-enforced prompt paused the run until the user typed `yes`:
+
+```text
+Pay $80.00 toward the October 2026 bill of subscriber 5551001 (remaining balance $80.00)? (yes/no) yes
+[trace] tool pay_bill {"month":10,"year":2026,"amount":80} -> ok (182 ms) {"payment_status":"SUCCESS","transaction_id":"f6c716d6-…","amount":80,"paid_amount":80,"remaining_balance":0,"bill_status":"PAID",…}
+```
+
+> Your October 2026 bill is paid. Amount paid: $80.00. Remaining balance: $0.00. Transaction ID: f6c716d6-d380-482c-b6c9-712e4fb11d5f.
+
+The cloud database was reseeded afterwards (`.\deploy\azure.ps1 -Step seed -Reset`), so October 2026 is UNPAID again.
+
+**5. Identity rule.** The request is refused without any tool call. Even if the model tried, no tool accepts a subscriber number:
+
+> I can only help with your own account (subscriber 5551001), so I can't show subscriber 5551002's bill. If you'd like, I can show you your October 2026 bill instead.
+
+To reproduce (the cloud apps scale to zero, so the first request can take about 25 s):
+
+```bash
+cd agent && npm ci
+export ANTHROPIC_API_KEY=...   # or put it in .env at the repo root
+export BILLING_API_URL=https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io
+export MCP_SERVER_URL=https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp
+export AGENT_MODEL=claude-haiku-5-5 BILLING_PASSWORD=sub1001-demo-pass
+npm run dev -- -u sub5551001 -m "Why is my October bill higher?"
+```
+
 ## Cloud deployment (Azure)
 
 Deployed on Azure for Students with one rerunnable script, [deploy/azure.ps1](deploy/azure.ps1).

@@ -128,7 +128,7 @@ The implemented schema, with constraints, is drawn as a Mermaid ER diagram in th
   - Explain the dispute process, but never promise a refund or adjustment (§7.2, §7.3). There is no Dispute API.
   - Never invent usage numbers. Fetch them with Query Bill Detailed (§8.2).
 - [x] Log a **tool trace** for every turn (tool name, inputs, result, final answer) to the console and a JSON file. This is a graded deliverable.
-- [ ] Required scenarios (all four pass with a mocked LLM and against the real API + MCP server; still to run with the live LLM and save the traces):
+- [x] Required scenarios (pass with a mocked LLM, and live with Haiku 5.5 against Azure on 2026-11-22; traces in `docs/traces/`, plus an identity-refusal trace):
   1. **MCP only:** "How much does extra internet cost?"
   2. **API only:** "What is my October bill?"
   3. **Combined:** "Why is my October bill higher?" (Detailed API + MCP)
@@ -169,14 +169,14 @@ Built with Kong 3.9 OSS, DB-less (`gateway/`). Details and the route table are i
 
 | Phase | Work | Rough effort | Done |
 |---|---|---|---|
-| 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [~] all but the LLM API key |
+| 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [x] done |
 | 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [x] migrations and seed run on Postgres (PGlite); Docker image not yet built |
 | 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [x] ported to NestJS; 86 tests pass on Postgres |
 | 2b | **Cloud skeleton:** API and Kong gateway containers on Azure Container Apps, with one public and one JWT-protected route | 0.5 day | [x] done with Phase 6 (`deploy/azure.ps1`) |
 | 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; screenshot still to do |
 | 4 | MCP server + index + three retrieval tests | 1 day | [x] ported to the TypeScript SDK |
-| 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [~] built; 48 tests pass with a mocked LLM; live-LLM run and saved traces still to do |
-| 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [~] all deployed in Sweden Central and seeded; 24 gateway tests pass against Azure; agent not yet run against the cloud |
+| 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [x] 48 tests pass with a mocked LLM; live run against Azure done, traces in `docs/traces/` |
+| 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [x] all deployed in Sweden Central and seeded; 24 gateway tests pass against Azure; agent run against the cloud |
 | 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |
 
 About two weeks of steady work. Phase 2b deliberately comes early, because cloud and gateway setup is where surprises usually show up and redeploying later is cheap.
@@ -219,10 +219,10 @@ README.md
 - [x] Cloud URLs and deployment steps
 - [ ] How to run the tests + a screenshot of the output
 - [ ] Test data, credentials and steps for the instructor to reproduce results
-- [ ] Three agent scenarios with tool traces (MCP-only, API-only, combined)
+- [x] Three agent scenarios with tool traces (MCP-only, API-only, combined)
 - [x] Three MCP retrieval tests
 - [ ] Protected gateway route demo
-- [ ] Confirmed simulated payment
+- [x] Confirmed simulated payment
 - [ ] Assumptions: rounding, the $0-usage case, recalculation, error codes, identity, deployment choices, LLM cost
 - [ ] Link to the demo video
 

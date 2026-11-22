@@ -97,7 +97,7 @@ The implemented schema, with constraints, is drawn as a Mermaid ER diagram in th
 
 - [x] `POST /api/v1/auth/login` returns a JWT with `sub=username`, `role`, `subscriber_no`, `iss` and `aud` (the gateway checks `iss`/`aud` too).
 - [x] Add Usage and Calculate Bill are admin-only; Pay Bill and Query Bill Detailed allow the subscriber (own account) or an admin. Documented in the README.
-- [x] **Key rule:** for protected calls, the subscriber number comes from the **token**, never from the prompt. If someone types "show me subscriber 999's details," the API returns 403. Covered by tests; still to show in the demo.
+- [x] **Key rule:** for protected calls, the subscriber number comes from the **token**, never from the prompt. If someone types "show me subscriber 999's details," the API returns 403. Covered by tests, verified against the cloud gateway, and shown in the identity-refusal agent trace.
 - [x] Query Bill is public by spec, so the **agent** must always fill `subscriber_no` from the logged-in session, never from the prompt (Phase 5).
 - [x] **Payment confirmation is enforced in code, not just in the prompt.** When the LLM asks for `pay_bill`, the agent pauses, shows `Pay $X for Oct 2025? (yes/no)` and only calls the API after an explicit yes. The agent generates the transaction ID (a UUID).
 
@@ -170,14 +170,14 @@ Built with Kong 3.9 OSS, DB-less (`gateway/`). Details and the route table are i
 | Phase | Work | Rough effort | Done |
 |---|---|---|---|
 | 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [x] done |
-| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [x] migrations and seed run on Postgres (PGlite); Docker image not yet built |
+| 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [x] migrations and seed run on Postgres (PGlite and Azure); images built and deployed |
 | 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [x] ported to NestJS; 86 tests pass on Postgres |
 | 2b | **Cloud skeleton:** API and Kong gateway containers on Azure Container Apps, with one public and one JWT-protected route | 0.5 day | [x] done with Phase 6 (`deploy/azure.ps1`) |
-| 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; screenshot still to do |
+| 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; test output pasted in the README; screenshot still to do |
 | 4 | MCP server + index + three retrieval tests | 1 day | [x] ported to the TypeScript SDK |
 | 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [x] 48 tests pass with a mocked LLM; live run against Azure done, traces in `docs/traces/` |
 | 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [x] all deployed in Sweden Central and seeded; 24 gateway tests pass against Azure; agent run against the cloud |
-| 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |
+| 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [~] README, ER diagram, logs and test data done; test screenshot and demo video still to do |
 
 About two weeks of steady work. Phase 2b deliberately comes early, because cloud and gateway setup is where surprises usually show up and redeploying later is cheap.
 
@@ -217,13 +217,13 @@ README.md
 - [x] ER diagram
 - [x] MCP tool schema and how the indexing works
 - [x] Cloud URLs and deployment steps
-- [ ] How to run the tests + a screenshot of the output
-- [ ] Test data, credentials and steps for the instructor to reproduce results
+- [~] How to run the tests + evidence of the output (pasted summary done; screenshot still to add)
+- [x] Test data, credentials and steps for the instructor to reproduce results
 - [x] Three agent scenarios with tool traces (MCP-only, API-only, combined)
-- [x] Three MCP retrieval tests
-- [ ] Protected gateway route demo
+- [x] Three MCP retrieval tests (regenerated against the cloud MCP server)
+- [x] Protected gateway route demo (cloud 401 without a token, 200 with one, 403 for another subscriber)
 - [x] Confirmed simulated payment
-- [ ] Assumptions: rounding, the $0-usage case, recalculation, error codes, identity, deployment choices, LLM cost
+- [x] Assumptions: rounding, the $0-usage case, recalculation, error codes, identity, deployment choices, LLM cost
 - [ ] Link to the demo video
 
 ---

@@ -1,6 +1,8 @@
 # AI Billing Support Assistant (SE4458 Midterm)
 
-Work in progress. The full plan and requirement checklist are in [docs/PLAN.md](docs/PLAN.md). The policy document is [docs/Mobile_Provider_Billing_Guide.md](docs/Mobile_Provider_Billing_Guide.md).
+A conversational billing assistant for mobile subscribers: an LLM agent that answers from the billing guide (over MCP) and from live account data (over a REST API behind an API gateway), deployed on Azure. The policy document is [docs/Mobile_Provider_Billing_Guide.md](docs/Mobile_Provider_Billing_Guide.md); the plan and requirement checklist are in [docs/PLAN.md](docs/PLAN.md).
+
+**Quick links:** [Gateway (cloud)](https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io) · [Swagger UI](https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/docs) · [MCP server](https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/health) · [Test data and how to reproduce](#test-data-and-how-to-reproduce) · [Agent scenarios](#live-runs-against-azure) · Demo video: _link to be added_
 
 ## Architecture
 
@@ -28,7 +30,7 @@ flowchart LR
 | `billing-api/` | TypeScript: NestJS 11 + TypeORM on PostgreSQL, migrations, seed script, Jest tests | all 5 operations + JWT done; 86 tests pass on Postgres |
 | `mcp-server/` | TypeScript MCP server over `data/Mobile_Provider_Billing_Guide.md` | BM25 index, stdio + HTTP; 42 Vitest tests, retrieval scores identical to the Python version |
 | `deploy/` | `azure.ps1`: deploys the stack to Azure (Postgres, registry, Container Apps) | deployed and seeded |
-| `agent/` | TypeScript CLI agent: Claude tool calling over the REST API and the MCP server | loop, payment confirmation and tool trace done; 48 Vitest tests with a mocked LLM; not yet run against the live LLM |
+| `agent/` | TypeScript CLI agent: Claude tool calling over the REST API and the MCP server | loop, payment confirmation and tool trace done; 48 Vitest tests with a mocked LLM; run live against Azure (traces in `docs/traces/`) |
 | `gateway/` | Kong 3.9 (OSS, DB-less) declarative config, Docker image, integration tests | route mapping + JWT validation done; 24 integration tests pass locally and against Azure |
 
 The three services are TypeScript on Node.js 22.18+ (the Docker images use Node 24). Each is its own npm package.
@@ -56,6 +58,26 @@ npm test
 ```
 
 The agent tests replace the LLM with a scripted one, so they need no API key. One test also talks to the real MCP server over stdio when `mcp-server` has been built (`npm run build` there); otherwise it is skipped.
+
+**Last run** (2026-11-22, Windows 11, Node 26, no Docker, cloud or API key), summary lines from each suite:
+
+```text
+billing-api> npm test
+Test Suites: 7 passed, 7 total
+Tests:       86 passed, 86 total
+
+mcp-server> npm test
+ Test Files  5 passed (5)
+      Tests  42 passed (42)
+
+agent> npm test
+ Test Files  3 passed (3)
+      Tests  48 passed (48)
+```
+
+Every REST operation (Login, Add Usage, Calculate Bill, Query Bill, Query Bill Detailed, Pay Bill) has success and failure/edge-case tests in `billing-api/test/` (`auth`, `usage`, `bills`, `payments`, `pricing`, `seed`, `openapi` specs). <!-- TODO: add a screenshot of the full test output under docs/ and link it here -->
+
+The gateway has a further 24 integration tests (`gateway/test/`), which need the running stack: see [API gateway](#api-gateway-kong).
 
 ## Run locally with Postgres (needs Docker)
 
@@ -208,22 +230,25 @@ Other settings: the gateway never retries a request on its own (`retries: 0`), s
 
 **Gateway URL.** Cloud: **https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io**. Locally: `http://localhost:8080` (docker compose). See [Cloud deployment](#cloud-deployment-azure).
 
-**Protected route through the gateway.** The first request below has no token, and Kong answers it itself (`X-Kong-Response-Latency`, no upstream). The second has a login token and is proxied (`X-Kong-Upstream-Latency`).
+**Protected route through the gateway.** The first request below, captured from the cloud gateway on 2026-11-22, has no token, and Kong answers it itself (`X-Kong-Response-Latency`, no upstream). The second has a login token and is proxied (`X-Kong-Upstream-Latency`).
 
 ```http
-GET /api/v1/bills/detailed?month=10&year=2026
+GET https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/api/v1/bills/detailed?month=10&year=2026
 
 HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Bearer
-X-Kong-Response-Latency: 1
-X-Kong-Request-Id: 92de8e732c8c9324710c570a5f98df20
+content-type: application/json; charset=utf-8
+www-authenticate: Bearer
+x-kong-response-latency: 0
+x-kong-request-id: a101c5682a6c1845dde90a10bc00f50d
+
 {"message":"Unauthorized"}
 ```
 
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login -H 'content-type: application/json' \
+GW=https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io   # or http://localhost:8080
+TOKEN=$(curl -s -X POST "$GW/api/v1/auth/login" -H 'content-type: application/json' \
   -d '{"username":"sub5551001","password":"sub1001-demo-pass"}' | jq -r .access_token)
-curl -s "http://localhost:8080/api/v1/bills/detailed?month=10&year=2026" -H "Authorization: Bearer $TOKEN"
+curl -s "$GW/api/v1/bills/detailed?month=10&year=2026" -H "Authorization: Bearer $TOKEN"
 ```
 
 Errors the gateway produces itself are Kong's bodies, not the API's `{"error": ...}` shape. A missing token gives `{"message":"Unauthorized"}`, a bad signature `{"message":"Invalid signature"}`, an unknown issuer `{"message":"No credentials found for given 'iss'"}`, an expired token `{"exp":"token expired"}`, a wrong audience `{"message":"Invalid audience"}`, and an unmapped path is a 404 with `{"message":"no Route matched with those values"}`. The agent passes these to the LLM as they are.
@@ -297,7 +322,7 @@ npm test
 
 HTTP mode also serves `GET /health`. The Docker image runs HTTP mode on port 8001.
 
-**Three retrieval tests:** [docs/mcp_retrieval_tests.md](docs/mcp_retrieval_tests.md), generated by `npm run demo -- --write` over a real MCP transport (add `--url http://host:8001/mcp` to run against a deployed server).
+**Three retrieval tests:** [docs/mcp_retrieval_tests.md](docs/mcp_retrieval_tests.md), generated by `npm run demo -- --write` over a real MCP transport. The committed file was produced against the deployed server on Azure (`--url https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp`); without `--url` the script spawns the server over stdio and gives the same results.
 
 | Query | Top result | Also returned |
 |---|---|---|
@@ -482,7 +507,38 @@ Each step can be rerun: existing resources are reused, and `images` followed by 
 - **Database access.** "Allow Azure services" is on so the Container Apps can connect (connections still need the password over TLS). The seed step adds a firewall rule for the deploying machine's IP only. Remove it when you no longer need it: `az postgres flexible-server firewall-rule delete -g rg-billing-se4458 --server-name pg-billing-1nxgw2-swedencentral --name seed-from-laptop --yes`.
 - **No retries at the gateway**, and at most one replica per app, so the demo behaves predictably. Raise `--max-replicas` for real traffic.
 
-## Assumptions so far
+## Test data and how to reproduce
+
+The same demo data is in the cloud database and in any local database after `npm run seed`. It's defined in [billing-api/scripts/seed.ts](billing-api/scripts/seed.ts); `-- --reset` (or `.\deploy\azure.ps1 -Step seed -Reset` for the cloud) wipes and reseeds, for example after trying a payment.
+
+**Logins** (test values only, not real credentials):
+
+| Username | Password | Role | Subscriber |
+|---|---|---|---|
+| `sub5551001` | `sub1001-demo-pass` | SUBSCRIBER | 5551001 |
+| `sub5551002` | `sub1002-demo-pass` | SUBSCRIBER | 5551002 |
+| `admin` | `admin-demo-pass` | ADMIN | – |
+
+**Bills:**
+
+| Subscriber | Period | Usage | Bill | Paid | Status | Shows |
+|---|---|---|---|---|---|---|
+| 5551001 | Sep 2026 | 800 min, 18,000 MB | $50 | $50 | PAID | baseline month |
+| 5551001 | Oct 2026 | 1,350 min, 35,000 MB | $80 | $0 | UNPAID | "Why is my October bill higher?", "Pay my bill"; the guide's §4.3 example |
+| 5551002 | Sep 2026 | 2,010 min, 30,001 MB | $90 | $40 | PARTIAL | a partial payment; block rounding on both lines |
+| 5551002 | Oct 2026 | 600 min, 0 MB | $50 | $0 | UNPAID | the $50 internet base with zero usage |
+
+**Steps for the instructor** (against the cloud; no Azure account needed):
+
+1. **Unit tests:** `npm ci && npm test` in `billing-api/`, `mcp-server/` and `agent/` (see [Run the unit tests](#run-the-unit-tests-no-docker-cloud-or-llm-needed)).
+2. **Gateway, public and protected routes:** the `curl` commands under [Try it](#cloud-deployment-azure). Expected: Query Bill 200 with `total: 80`; Query Bill Detailed 401 without a token and 200 with one; a token for `sub5551001` asking for `subscriber_no=5551002` gets 403.
+3. **Swagger UI:** open `/docs` on the gateway, click *Authorize* with a token from `POST /api/v1/auth/login`, and try any operation. Admin operations (Add Usage, Calculate Bill) need the `admin` login.
+4. **MCP retrieval:** `cd mcp-server && npm ci && npm run demo -- --url https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp`. Expected top results: §8.1, §5.1, §6.2.
+5. **Agent scenarios:** the commands under [Live runs against Azure](#live-runs-against-azure) with your own `ANTHROPIC_API_KEY`. Ask the questions in that table; for "Pay my bill", answer `yes` at the prompt. Then reseed, or the October bill stays PAID.
+
+The cloud apps scale to zero, so the first request after a quiet period can take about 25 s.
+
+## Assumptions
 
 - Pricing follows guide §4.2 exactly, using integer MB arithmetic (1 GB = 1,000 MB). The $50 internet base is charged even with zero usage (§3.1). There are no taxes or fees (§4.2).
 - The brief's sample "Apr 2025 → $75" can't come from these rules (totals move in $10 steps from $50), so it's treated as an illustration of the response shape only.

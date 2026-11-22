@@ -60,12 +60,12 @@ function Write-Stage([string]$Text) { Write-Host "`n=== $Text" -ForegroundColor 
 # Runs az and stops on failure. The error names only the command, never the
 # arguments, because some of them are secrets.
 function Invoke-AzCli {
-  & az @args
+  & az @args --only-show-errors
   if ($LASTEXITCODE -ne 0) { throw "az $($args[0]) $($args[1]) $($args[2]) failed (exit $LASTEXITCODE)" }
 }
 
 function Get-AzValue {
-  $out = & az @args
+  $out = & az @args --only-show-errors
   if ($LASTEXITCODE -ne 0) { throw "az $($args[0]) $($args[1]) $($args[2]) failed (exit $LASTEXITCODE)" }
   if ($null -eq $out) { return '' }
   return ($out | Out-String).Trim()

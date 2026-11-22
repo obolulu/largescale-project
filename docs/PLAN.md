@@ -36,7 +36,7 @@ The LLM never calls backend services directly. The agent runs every tool call.
 | MCP | Official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, `McpServer`) + a small built-in BM25 index | Counts as a "real MCP SDK server", and full-text search is enough |
 | Agent | TypeScript CLI on the Anthropic SDK (`@anthropic-ai/sdk`), a hand-written tool loop; Claude Opus 5.5 at low effort by default, any model via `AGENT_MODEL` | The brief asks for low cost, and the cost must be documented: each turn logs its token usage and estimated cost |
 | Gateway | Kong Gateway 3.9 OSS, DB-less (declarative config) | Named in the brief; free, runs the same in docker-compose and on Azure Container Apps, and can be tested locally (APIM can't) |
-| Cloud | Azure for Students (Container Apps + Azure Database for PostgreSQL Flexible) | Deploying locally costs points |
+| Cloud | Azure for Students: Container Apps (WorkloadProfiles env, Consumption) + Azure Database for PostgreSQL Flexible (B1ms), Sweden Central | Deploying locally costs points; France Central had no B1ms capacity for the subscription |
 | Tests | Jest + supertest (API) on Postgres via in-process PGlite or `TEST_DATABASE_URL`; Vitest (MCP); LLM mocked | Tests must run without the cloud or a live LLM |
 
 > The project was first written in Python (FastAPI, SQLAlchemy, MCP Python SDK) and then ported to TypeScript with the same API contract and MCP tool behaviour. The Python version is the "Python implementation snapshot" commit in git history.
@@ -147,7 +147,7 @@ Built with Kong 3.9 OSS, DB-less (`gateway/`). Details and the route table are i
   - `/api/v1/payments`
   - `/api/v1/usage`
 - [x] JWT validation at the gateway (Kong `jwt` plugin: signature, `iss`, `exp`; a `post-function` checks `aud`) and again in the API. 24 integration tests in `gateway/test/` pass against the docker-compose stack.
-- [~] Document the gateway URL, a route-mapping table and one error response (for example a 401 with no token). Route table and 401 example done; the cloud URL comes with Phase 2b.
+- [x] Document the gateway URL, a route-mapping table and one error response (for example a 401 with no token). Cloud gateway: https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io
 - [x] Group 2 has no rate limit in the spec. None added (stated in the README).
 
 ---
@@ -169,14 +169,14 @@ Built with Kong 3.9 OSS, DB-less (`gateway/`). Details and the route table are i
 
 | Phase | Work | Rough effort | Done |
 |---|---|---|---|
-| 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [ ] |
+| 0 | Setup: GitHub repo, install Docker Desktop and the Azure CLI, activate Azure for Students, get one LLM API key | 1 hour | [~] all but the LLM API key |
 | 1 | Repo skeleton, docker-compose (Postgres), schema + migrations, seed data, pricing functions + tests | 1 day | [x] migrations and seed run on Postgres (PGlite); Docker image not yet built |
 | 2 | REST API + business logic + Swagger + JWT (write each operation's tests alongside it) | 2–3 days | [x] ported to NestJS; 86 tests pass on Postgres |
-| 2b | **Cloud skeleton:** API and Kong gateway containers on Azure Container Apps, with one public and one JWT-protected route | 0.5 day | [ ] |
+| 2b | **Cloud skeleton:** API and Kong gateway containers on Azure Container Apps, with one public and one JWT-protected route | 0.5 day | [x] done with Phase 6 (`deploy/azure.ps1`) |
 | 3 | Fill test gaps: run the suite on Postgres, test output screenshot for the README | 0.5 day | [~] suite runs on Postgres; screenshot still to do |
 | 4 | MCP server + index + three retrieval tests | 1 day | [x] ported to the TypeScript SDK |
 | 5 | Agent loop + confirmation step + tool trace, tested locally against all four scenarios | 2 days | [~] built; 48 tests pass with a mocked LLM; live-LLM run and saved traces still to do |
-| 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [ ] |
+| 6 | Cloud: deploy the managed DB and MCP server, redeploy the API, point the agent at the gateway URL | 1 day | [~] all deployed in Sweden Central and seeded; 24 gateway tests pass against Azure; agent not yet run against the cloud |
 | 7 | README, ER diagram, screenshots/logs, demo video | 1 day | [ ] |
 
 About two weeks of steady work. Phase 2b deliberately comes early, because cloud and gateway setup is where surprises usually show up and redeploying later is cheap.
@@ -201,6 +201,7 @@ billing-api/       NestJS app: src/ (api, auth, billing, pricing, database), scr
 mcp-server/        src/indexer.ts, src/server.ts, data/Mobile_Provider_Billing_Guide.md, test/
 agent/             agent, tools, confirmation, trace logging, tests (mock LLM)
 gateway/           kong.yml.tmpl (Kong DB-less), Dockerfile, render-config.sh, integration tests
+deploy/            azure.ps1 (Azure deployment, rerunnable steps)
 docs/              PLAN.md, billing guide, ER diagram, openapi.yaml, screenshots, tool traces
 docker-compose.yml
 README.md
@@ -211,11 +212,11 @@ README.md
 ## 12. README checklist (all of it goes in the README, nothing in Moodle)
 
 - [x] Architecture diagram, stack, and the API style chosen
-- [~] Gateway URL, route mappings, a protected route example, an error response example (all but the cloud URL)
+- [x] Gateway URL, route mappings, a protected route example, an error response example
 - [x] Swagger link + `openapi.yaml`
 - [x] ER diagram
 - [x] MCP tool schema and how the indexing works
-- [ ] Cloud URLs and deployment steps
+- [x] Cloud URLs and deployment steps
 - [ ] How to run the tests + a screenshot of the output
 - [ ] Test data, credentials and steps for the instructor to reproduce results
 - [ ] Three agent scenarios with tool traces (MCP-only, API-only, combined)

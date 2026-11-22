@@ -26,3 +26,6 @@ agent/traces/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Azure deploy state: generated secrets and resource names
+deploy/.azure.local.json

@@ -27,8 +27,9 @@ flowchart LR
 |---|---|---|
 | `billing-api/` | TypeScript: NestJS 11 + TypeORM on PostgreSQL, migrations, seed script, Jest tests | all 5 operations + JWT done; 86 tests pass on Postgres |
 | `mcp-server/` | TypeScript MCP server over `data/Mobile_Provider_Billing_Guide.md` | BM25 index, stdio + HTTP; 42 Vitest tests, retrieval scores identical to the Python version |
+| `deploy/` | `azure.ps1`: deploys the stack to Azure (Postgres, registry, Container Apps) | deployed and seeded |
 | `agent/` | TypeScript CLI agent: Claude tool calling over the REST API and the MCP server | loop, payment confirmation and tool trace done; 48 Vitest tests with a mocked LLM; not yet run against the live LLM |
-| `gateway/` | Kong 3.9 (OSS, DB-less) declarative config, Docker image, integration tests | route mapping + JWT validation done; 24 integration tests pass against the docker-compose stack; not deployed yet |
+| `gateway/` | Kong 3.9 (OSS, DB-less) declarative config, Docker image, integration tests | route mapping + JWT validation done; 24 integration tests pass locally and against Azure |
 
 The three services are TypeScript on Node.js 22.18+ (the Docker images use Node 24). Each is its own npm package.
 
@@ -205,7 +206,7 @@ erDiagram
 
 Other settings: the gateway never retries a request on its own (`retries: 0`), so a Pay Bill can't be replayed behind the agent's back. Retries stay with the agent and reuse the same `transaction_id`. The `Server` version header is off, and every response carries an `X-Kong-Request-Id`. There's no rate limit, because Group 2's spec has none.
 
-**Gateway URL.** Locally it's `http://localhost:8080` (docker compose). Cloud URL: not deployed yet.
+**Gateway URL.** Cloud: **https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io**. Locally: `http://localhost:8080` (docker compose). See [Cloud deployment](#cloud-deployment-azure).
 
 **Protected route through the gateway.** The first request below has no token, and Kong answers it itself (`X-Kong-Response-Latency`, no upstream). The second has a login token and is proxied (`X-Kong-Upstream-Latency`).
 
@@ -346,6 +347,84 @@ npm run dev -- -u sub5551001 -m "Pay my bill"         # one question; the paymen
 
 Only subscriber logins are accepted; the admin account is refused, since admins have no own account to act on.
 
+## Cloud deployment (Azure)
+
+Deployed on Azure for Students with one rerunnable script, [deploy/azure.ps1](deploy/azure.ps1).
+
+| Service | URL | Reachable from |
+|---|---|---|
+| **API gateway** (Kong) | https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io | the internet (HTTPS) |
+| Swagger UI, through the gateway | https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/docs | the internet |
+| **MCP server** | https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp (health: `/health`) | the internet |
+| Billing API | `billing-api.internal…azurecontainerapps.io` | **only the gateway** (internal ingress; a direct call from outside gets 404) |
+| PostgreSQL 16 | `pg-billing-1nxgw2-swedencentral.postgres.database.azure.com` | the Container Apps (Azure services) and the IP the seed ran from; TLS required |
+
+```mermaid
+flowchart LR
+    agent["agent CLI<br/>(laptop)"] -->|HTTPS + JWT| gw
+    agent -->|HTTPS /mcp| mcp
+    subgraph aca["Container Apps environment cae-billing (Sweden Central)"]
+        gw["billing-gateway<br/>Kong, external ingress :8080"] -->|HTTPS, internal ingress| api["billing-api<br/>NestJS :8000"]
+        mcp["billing-mcp<br/>external ingress :8001"]
+    end
+    api -->|"TLS (sslmode=verify-full)"| db[("Azure Database for PostgreSQL<br/>Flexible Server, B1ms")]
+    acr[("Azure Container Registry<br/>acrbilling1nxgw2")] -.->|image pull| aca
+```
+
+**Try it** (the apps scale to zero, so the first request after a quiet period takes a few seconds):
+
+```bash
+GW=https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io
+curl "$GW/api/v1/bills?subscriber_no=5551001&month=10&year=2026"          # public: 200, total 80
+curl -i "$GW/api/v1/bills/detailed?month=10&year=2026"                    # protected, no token: 401 from Kong
+TOKEN=$(curl -s -X POST "$GW/api/v1/auth/login" -H 'content-type: application/json' \
+  -d '{"username":"sub5551001","password":"sub1001-demo-pass"}' | jq -r .access_token)
+curl "$GW/api/v1/bills/detailed?month=10&year=2026" -H "Authorization: Bearer $TOKEN"   # 200
+```
+
+Point the agent at the cloud with `BILLING_API_URL=https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io` and `MCP_SERVER_URL=https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp`.
+
+**Resources** (resource group `rg-billing-se4458`):
+
+| Resource | Type / size | Region |
+|---|---|---|
+| `pg-billing-1nxgw2-swedencentral` | PostgreSQL 16 Flexible Server, Burstable `Standard_B1ms`, 32 GB, database `billing` | Sweden Central |
+| `cae-billing` | Container Apps environment, WorkloadProfiles mode (Consumption profile), Log Analytics logs | Sweden Central |
+| `billing-api`, `billing-gateway`, `billing-mcp` | Container Apps, 0.5 vCPU / 1 GiB, 0–1 replicas | Sweden Central |
+| `acrbilling1nxgw2` | Container Registry, Basic | France Central |
+
+**Secrets.** The script generates the JWT secret and the database password and keeps them in `deploy/.azure.local.json`, which is gitignored. In Azure they're Container Apps secrets (`jwt-secret`, `database-url`), referenced by the `JWT_SECRET` and `DATABASE_URL` environment variables, so they never appear in the image or in git. The gateway and the API share the JWT secret.
+
+### Deploy it yourself
+
+Needs the Azure CLI (`winget install --exact --id Microsoft.AzureCLI`), Docker Desktop and Node.js 22.18+.
+
+```powershell
+az login                                   # choose the "Azure for Students" subscription
+.\deploy\azure.ps1 -Step infra -Location swedencentral   # resource group, registry, Postgres, environment (~15 min)
+.\deploy\azure.ps1 -Step images           # build the three images and push them
+.\deploy\azure.ps1 -Step apps             # create/update the Container Apps, print the URLs
+.\deploy\azure.ps1 -Step seed             # firewall rule for this IP, migrate, demo data (-Reset to wipe first)
+.\deploy\azure.ps1 -Step test             # gateway/test against the cloud gateway
+.\deploy\azure.ps1 -Step status           # URLs and health
+```
+
+Each step can be rerun: existing resources are reused, and `images` followed by `apps` deploys a new version as a new revision. The first `infra` run remembers the regions, so later steps don't need `-Location`. The API container applies migrations when it starts.
+
+**Cost.** Everything comes from the $100 student credit. The database is the main cost: B1ms compute is billed hourly while the server runs, plus its storage. The registry (Basic) is a few dollars a month. The Container Apps scale to zero and fit in the monthly free grant for a demo's traffic. To pause the database between sessions:
+
+```powershell
+.\deploy\azure.ps1 -Step stop     # compute billing stops; storage continues
+.\deploy\azure.ps1 -Step start
+```
+
+**Deployment notes**
+- **Regions.** This Azure for Students subscription may only deploy to France Central, Spain Central, Sweden Central, Switzerland North and UAE North. France Central answered `SkuNotAvailable` for Postgres B1ms in every zone, so the database and the apps are in Sweden Central. The registry was already in France Central, which only affects image pull speed.
+- **Environment mode.** With Azure CLI 2.93 the environment came up in *Express* mode. There, managed identities aren't supported and app revisions failed to provision (`Artifact app provisioning failed`). The script asks for `WorkloadProfiles` explicitly and refuses to reuse an Express environment.
+- **Registry access.** Images are pulled with the registry's admin credentials, which Container Apps keeps as an app secret. A managed identity would be the next hardening step.
+- **Database access.** "Allow Azure services" is on so the Container Apps can connect (connections still need the password over TLS). The seed step adds a firewall rule for the deploying machine's IP only. Remove it when you no longer need it: `az postgres flexible-server firewall-rule delete -g rg-billing-se4458 --server-name pg-billing-1nxgw2-swedencentral --name seed-from-laptop --yes`.
+- **No retries at the gateway**, and at most one replica per app, so the demo behaves predictably. Raise `--max-replicas` for real traffic.
+
 ## Assumptions so far
 
 - Pricing follows guide §4.2 exactly, using integer MB arithmetic (1 GB = 1,000 MB). The $50 internet base is charged even with zero usage (§3.1). There are no taxes or fees (§4.2).
@@ -358,6 +437,7 @@ Only subscriber logins are accepted; the admin account is refused, since admins 
 - Payments: amount must be > 0, have at most 2 decimals, and not exceed the remaining balance. `transaction_id` is a client-generated idempotency key (the agent uses a UUID). Status follows §5.1: UNPAID → PARTIAL → PAID.
 - Query Bill is unauthenticated because the spec says so. It returns only totals and status, no usage details. The agent always fills `subscriber_no` from the logged-in session, never from the prompt.
 - Money is stored as `NUMERIC(10,2)` and returned as a JSON number in USD. `due_date` is 15 days after the end of the billing month (§6.1).
+- Deployment: Azure Container Apps for the three services and Azure Database for PostgreSQL Flexible Server, in Sweden Central (see [Deployment notes](#cloud-deployment-azure)). The agent runs on the user's machine and talks to the cloud gateway and MCP server.
 - The MCP server has no authentication: it serves only the public policy guide, never subscriber data. Account data stays behind the JWT-protected REST API.
 - The API tests run on PostgreSQL: in-process PGlite by default, or any server named by `TEST_DATABASE_URL`. SQLite isn't used anywhere (it doesn't meet the server-database requirement).
 - Money is integer cents in code, so there is no floating-point rounding. Payment amounts may be sent as a JSON number or a string (`30`, `"29.50"`).

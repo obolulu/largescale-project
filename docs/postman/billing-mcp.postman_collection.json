@@ -1,0 +1,609 @@
+{
+  "info": {
+    "name": "SE4458 Billing Docs MCP server",
+    "description": "The billing documentation MCP server, called with plain JSON-RPC over Streamable HTTP, so it runs in the collection runner and newman. Run the requests in order: Initialize saves the session ID (the mcp-session-id header) that every later request sends. Works with the \"Billing - Azure\" or \"Billing - Local (docker compose)\" environment from docs/postman/; without one, it defaults to Azure. On Azure the first request can take ~40 s while the app wakes. Nothing here changes data.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "mcp",
+      "value": "https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp"
+    },
+    {
+      "key": "mcp_session",
+      "value": ""
+    },
+    {
+      "key": "mcp_public",
+      "value": "https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/mcp"
+    },
+    {
+      "key": "anthropic_api_key",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "chat_model",
+      "value": "claude-opus-5-5"
+    },
+    {
+      "key": "question",
+      "value": "How much does extra internet cost?"
+    }
+  ],
+  "item": [
+    {
+      "name": "1 Initialize (saves the session ID)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"server is billing-docs\", () => pm.expect(msg.result.serverInfo.name).to.eql(\"billing-docs\"));",
+              "pm.test(\"offers tools\", () => pm.expect(msg.result.capabilities).to.have.property(\"tools\"));",
+              "const sessionId = pm.response.headers.get(\"mcp-session-id\");",
+              "pm.test(\"returns a session ID\", () => pm.expect(sessionId).to.be.a(\"string\").and.not.empty);",
+              "const store = pm.environment.name ? pm.environment : pm.collectionVariables;",
+              "store.set(\"mcp_session\", sessionId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": {\n      \"name\": \"postman\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "2 Initialized notification (202)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 202\", () => pm.response.to.have.status(202));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"notifications/initialized\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "3 List tools",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "const tool = msg.result.tools.find((t) => t.name === \"search_billing_documentation\");",
+              "pm.test(\"has search_billing_documentation\", () => pm.expect(tool).to.be.an(\"object\"));",
+              "pm.test(\"query is required\", () => pm.expect(tool.inputSchema.required).to.include(\"query\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/list\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "4 Search: \"extra internet price\" (top result §8.1)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"tool succeeded\", () => pm.expect(msg.result.isError).to.not.equal(true));",
+              "const result = msg.result.structuredContent;",
+              "pm.test(\"from the billing guide\", () => pm.expect(result.document_id).to.eql(\"MOB-BILLING-2026-01\"));",
+              "pm.test(\"top result is §8.1\", () => pm.expect(result.matches[0].section).to.eql(\"8.1\"));",
+              "console.log(result.matches.map((m) => m.reference + \"  (score \" + m.score + \")\").join(\"\\n\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_billing_documentation\",\n    \"arguments\": {\n      \"query\": \"extra internet price\",\n      \"max_results\": 3\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "5 Search: \"partial payment rules\" (top result §5.1)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"tool succeeded\", () => pm.expect(msg.result.isError).to.not.equal(true));",
+              "const result = msg.result.structuredContent;",
+              "pm.test(\"from the billing guide\", () => pm.expect(result.document_id).to.eql(\"MOB-BILLING-2026-01\"));",
+              "pm.test(\"top result is §5.1\", () => pm.expect(result.matches[0].section).to.eql(\"5.1\"));",
+              "console.log(result.matches.map((m) => m.reference + \"  (score \" + m.score + \")\").join(\"\\n\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_billing_documentation\",\n    \"arguments\": {\n      \"query\": \"partial payment rules\",\n      \"max_results\": 3\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "6 Search: \"late payment penalty\" (top result §6.2)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"tool succeeded\", () => pm.expect(msg.result.isError).to.not.equal(true));",
+              "const result = msg.result.structuredContent;",
+              "pm.test(\"from the billing guide\", () => pm.expect(result.document_id).to.eql(\"MOB-BILLING-2026-01\"));",
+              "pm.test(\"top result is §6.2\", () => pm.expect(result.matches[0].section).to.eql(\"6.2\"));",
+              "console.log(result.matches.map((m) => m.reference + \"  (score \" + m.score + \")\").join(\"\\n\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_billing_documentation\",\n    \"arguments\": {\n      \"query\": \"late payment penalty\",\n      \"max_results\": 3\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "7 Unrelated query (no matches)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"matches is empty\", () => pm.expect(msg.result.structuredContent.matches).to.eql([]));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_billing_documentation\",\n    \"arguments\": {\n      \"query\": \"weather forecast tomorrow\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "8 max_results out of range (error)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The server answers as an event stream (event: message / data: {...}); take the JSON from the data line.",
+              "const text = pm.response.text();",
+              "const dataLine = text.split(/\\r?\\n/).find((l) => l.startsWith(\"data:\"));",
+              "const msg = JSON.parse(dataLine ? dataLine.slice(5) : text);",
+              "// The SDK reports bad tool input as a tool error (isError) or a JSON-RPC error, depending on version.",
+              "pm.test(\"rejected\", () => pm.expect(Boolean(msg.error) || msg.result.isError === true).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_billing_documentation\",\n    \"arguments\": {\n      \"query\": \"late fee\",\n      \"max_results\": 9\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "9 Close the session",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "10 Use the closed session (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Session not found\", () => pm.expect(pm.response.json().error.message).to.eql(\"Session not found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "mcp-session-id",
+            "value": "{{mcp_session}}"
+          },
+          {
+            "key": "mcp-protocol-version",
+            "value": "2025-06-18"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/list\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{mcp}}"
+      }
+    },
+    {
+      "name": "Chat (Claude + this MCP server, needs an Anthropic API key)",
+      "description": "Not run by the plain-JSON-RPC steps above. Set anthropic_api_key and question in the collection Variables tab.",
+      "item": [
+        {
+          "name": "Chat with Claude (Claude calls this MCP server)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Edit the question in the collection's Variables tab (or the environment).",
+                  "const question = pm.variables.get(\"question\") || \"How much does extra internet cost?\";",
+                  "pm.variables.set(\"question_json\", JSON.stringify(question));",
+                  "if (!pm.variables.get(\"anthropic_api_key\")) {",
+                  "  // Skip quietly in a collection run without a key; a single Send shows this message.",
+                  "  console.warn(\"Set anthropic_api_key in the collection's Variables tab first. Skipping the chat request.\");",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "if (pm.response.code !== 200) { console.log(r); return; }",
+                  "const calls = r.content.filter((b) => b.type === \"mcp_tool_use\");",
+                  "const results = r.content.filter((b) => b.type === \"mcp_tool_result\");",
+                  "const answer = r.content.filter((b) => b.type === \"text\").map((b) => b.text).join(\"\\n\");",
+                  "pm.test(\"Claude called the MCP server\", () => pm.expect(calls.length).to.be.above(0));",
+                  "pm.test(\"answer is not empty\", () => pm.expect(answer).to.not.be.empty);",
+                  "console.log(\"Q: \" + pm.variables.get(\"question\"));",
+                  "calls.forEach((c) => console.log(\"tool call: \" + c.name + \" \" + JSON.stringify(c.input)));",
+                  "console.log(\"A: \" + answer);",
+                  "",
+                  "// Visualize tab: the answer, the tool calls and token usage.",
+                  "const esc = (s) => String(s).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\");",
+                  "pm.visualizer.set(`",
+                  "<style>body{font-family:sans-serif;max-width:760px;margin:16px;line-height:1.5}",
+                  ".q{color:#555}.a{white-space:pre-wrap;background:#f4f6fa;padding:12px;border-radius:6px}",
+                  "code{background:#eee;padding:1px 4px;border-radius:3px}small{color:#777}</style>",
+                  "<p class=q><b>You:</b> {{q}}</p><div class=a>{{{a}}}</div>",
+                  "<h4>Tool calls</h4><ul>{{#each calls}}<li><code>{{this}}</code></li>{{/each}}</ul>",
+                  "<small>{{model}} · {{inTok}} input / {{outTok}} output tokens · stop: {{stop}}</small>`, {",
+                  "  q: pm.variables.get(\"question\"),",
+                  "  a: esc(answer),",
+                  "  calls: calls.map((c, i) => c.name + \" \" + JSON.stringify(c.input) + (results[i] && results[i].is_error ? \"  (error)\" : \"\")),",
+                  "  model: r.model, inTok: r.usage.input_tokens, outTok: r.usage.output_tokens, stop: r.stop_reason,",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{anthropic_api_key}}"
+              },
+              {
+                "key": "anthropic-version",
+                "value": "2026-10-21"
+              },
+              {
+                "key": "anthropic-beta",
+                "value": "mcp-client-2025-11-20,server-side-fallback-2026-07-01"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"{{chat_model}}\",\n  \"max_tokens\": 4000,\n  \"output_config\": { \"effort\": \"low\" },\n  \"fallbacks\": \"default\",\n  \"system\": \"You are a billing support assistant for a mobile provider. Answer questions about billing rules from the Mobile Provider Billing Guide, using the search_billing_documentation tool, and cite section references such as §3.2. You have no access to the customer's account, bills or usage; if asked about them, say that the agent CLI or the Billing API handles account data. Keep answers short.\",\n  \"mcp_servers\": [\n    { \"type\": \"url\", \"url\": \"{{mcp_public}}\", \"name\": \"billing-docs\" }\n  ],\n  \"tools\": [\n    { \"type\": \"mcp_toolset\", \"mcp_server_name\": \"billing-docs\" }\n  ],\n  \"messages\": [\n    { \"role\": \"user\", \"content\": {{question_json}} }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "https://api.anthropic.com/v1/messages",
+            "description": "Ask Claude a billing question in plain English. Claude calls search_billing_documentation on the deployed MCP server through Anthropic's MCP connector, then answers with section references. Set anthropic_api_key and question in the collection's Variables tab, send, and open the Visualize tab. One question per send (no memory between sends). Anthropic's servers make the MCP call, so this always uses the public Azure MCP URL (mcp_public), never localhost. Costs a fraction of a cent per question."
+          }
+        }
+      ]
+    }
+  ]
+}

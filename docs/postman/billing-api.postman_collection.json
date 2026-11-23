@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "SE4458 Billing API (Azure gateway)",
-    "description": "Every billing operation through the Kong gateway on Azure Container Apps. Run the folders in order: 0 and 1 first (logins store tokens in the active environment, or in collection variables when none is selected). Folders 4 and 5 change data; reseed afterwards with `.\\deploy\\azure.ps1 -Step seed -Reset`. Select the \"Billing - Azure\" or \"Billing - Local (docker compose)\" environment from docs/postman/; without one, the collection defaults to Azure. The MCP server is not in this collection: use Postman's MCP request type (New > MCP, HTTP, {{mcp}}).",
+    "description": "Every billing operation through the Kong gateway on Azure Container Apps. Run the folders in order: 0 and 1 first (logins store tokens in the active environment, or in collection variables when none is selected). Folders 4 and 5 change data; reseed afterwards with `.\\deploy\\azure.ps1 -Step seed -Reset`. Select the \"Billing - Azure\" or \"Billing - Local (docker compose)\" environment from docs/postman/; without one, the collection defaults to Azure. The MCP server has its own collection: docs/postman/billing-mcp.postman_collection.json.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

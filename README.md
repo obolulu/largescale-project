@@ -75,7 +75,9 @@ agent> npm test
       Tests  48 passed (48)
 ```
 
-Every REST operation (Login, Add Usage, Calculate Bill, Query Bill, Query Bill Detailed, Pay Bill) has success and failure/edge-case tests in `billing-api/test/` (`auth`, `usage`, `bills`, `payments`, `pricing`, `seed`, `openapi` specs). <!-- TODO: add a screenshot of the full test output under docs/ and link it here -->
+Every REST operation (Login, Add Usage, Calculate Bill, Query Bill, Query Bill Detailed, Pay Bill) has success and failure/edge-case tests in `billing-api/test/` (`auth`, `usage`, `bills`, `payments`, `pricing`, `seed`, `openapi` specs).
+
+![Unit test runs for billing-api, mcp-server and agent](docs/screenshots/01-unit-tests.png)
 
 The gateway has a further 24 integration tests (`gateway/test/`), which need the running stack: see [API gateway](#api-gateway-kong).
 
@@ -232,6 +234,14 @@ Other settings: the gateway never retries a request on its own (`retries: 0`), s
 
 **Protected route through the gateway.** The first request below, captured from the cloud gateway on 2026-11-22, has no token, and Kong answers it itself (`X-Kong-Response-Latency`, no upstream). The second has a login token and is proxied (`X-Kong-Upstream-Latency`).
 
+Without a token, Kong rejects the request itself:
+
+![Protected route on the cloud gateway without a token: 401 from Kong](docs/screenshots/02-protected-route.png)
+
+With the Bearer token from Login, the request is proxied to the API:
+
+![Protected route on the cloud gateway with a token: 200](docs/screenshots/02-protected-route-b.png)
+
 ```http
 GET https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/api/v1/bills/detailed?month=10&year=2026
 
@@ -330,6 +340,8 @@ HTTP mode also serves `GET /health`. The Docker image runs HTTP mode on port 800
 | partial payment rules | §5.1 Full and partial payments | §5.2 Payment confirmation |
 | late payment penalty | §6.2 Late payment reminder ("does not add a fee") | §6.1 Due date, §6.3 Service restriction |
 
+![Three MCP retrieval tests against the deployed server](docs/screenshots/03-mcp-retrieval-tests.png)
+
 ## AI agent (CLI)
 
 A command-line chat for a logged-in subscriber. Claude (through the official Anthropic TypeScript SDK) picks the tools with real function calling; the agent runs every call itself, the documentation search over MCP and the account calls over REST, and sends the results back to Claude, which writes the answer. The loop is written by hand in [agent/src/agent.ts](agent/src/agent.ts).
@@ -388,6 +400,8 @@ All five turns together cost about $0.003.
 
 **1. MCP only.** One documentation search, answered with section references:
 
+![Agent session: MCP-only question answered from one search_billing_documentation call](docs/screenshots/04-agent-mcp-only.png)
+
 > Extra internet costs $10.00 for each additional 10 GB block beyond your 20 GB included allowance. A partially used block is charged as a full block. For example, 21 GB costs $60.00 in total for internet, and 30 GB also costs $60.00. (§3.2 Additional internet blocks, §8.1 What is the cost of extra internet?)
 
 **2. API only.** One Query Bill call through the gateway:
@@ -395,6 +409,8 @@ All five turns together cost about $0.003.
 > Your October 2026 bill is **$80.00**. Nothing has been paid yet, so the remaining balance is **$80.00**. The status is UNPAID, and the due date was **2026-11-15**, which has already passed.
 
 **3. Combined.** The agent fetched the detailed bills for October and September (JWT-protected route), then looked up the pricing rules over MCP:
+
+![Agent session: combined scenario with two query_bill_detailed calls and one search_billing_documentation call](docs/screenshots/05-agent-combined.png)
 
 > Your October bill is **$80.00**, up **$30.00** from September's **$50.00**. The increase comes from usage above your included allowances.
 >
@@ -413,6 +429,10 @@ Pay $80.00 toward the October 2026 bill of subscriber 5551001 (remaining balance
 > Your October 2026 bill is paid. Amount paid: $80.00. Remaining balance: $0.00. Transaction ID: f6c716d6-d380-482c-b6c9-712e4fb11d5f.
 
 The cloud database was reseeded afterwards (`.\deploy\azure.ps1 -Step seed -Reset`), so October 2026 is UNPAID again.
+
+A later interactive session, with a partial payment (§5.1): the agent asks for confirmation, `pay_bill` succeeds after `yes`, and the October bill moves to PARTIAL with $30.00 remaining.
+
+![Agent session: confirmed partial payment of $20.00 toward the October bill](docs/screenshots/06-agent-payment.png)
 
 **5. Identity rule.** The request is refused without any tool call. Even if the model tried, no tool accepts a subscriber number:
 
@@ -474,6 +494,10 @@ Point the agent at the cloud with `BILLING_API_URL=https://billing-gateway.orang
 | `cae-billing` | Container Apps environment, WorkloadProfiles mode (Consumption profile), Log Analytics logs | Sweden Central |
 | `billing-api`, `billing-gateway`, `billing-mcp` | Container Apps, 0.5 vCPU / 1 GiB, 0–1 replicas | Sweden Central |
 | `acrbilling1nxgw2` | Container Registry, Basic | France Central |
+
+![Resource group rg-billing-se4458 in the Azure portal](docs/screenshots/10-azure-resources.png)
+
+![Swagger UI served through the cloud gateway](docs/screenshots/09-swagger-ui.png)
 
 **Secrets.** The script generates the JWT secret and the database password and keeps them in `deploy/.azure.local.json`, which is gitignored. In Azure they're Container Apps secrets (`jwt-secret`, `database-url`), referenced by the `JWT_SECRET` and `DATABASE_URL` environment variables, so they never appear in the image or in git. The gateway and the API share the JWT secret.
 

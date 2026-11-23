@@ -2,7 +2,7 @@
 
 A conversational billing assistant for mobile subscribers: an LLM agent that answers from the billing guide (over MCP) and from live account data (over a REST API behind an API gateway), deployed on Azure. The policy document is [docs/Mobile_Provider_Billing_Guide.md](docs/Mobile_Provider_Billing_Guide.md); the plan and requirement checklist are in [docs/PLAN.md](docs/PLAN.md).
 
-**Quick links:** [Gateway (cloud)](https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io) · [Swagger UI](https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/docs) · [MCP server](https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/health) · [Test data and how to reproduce](#test-data-and-how-to-reproduce) · [Agent scenarios](#live-runs-against-azure) · Demo video: _link to be added_
+**Quick links:** [Gateway (cloud)](https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io) · [Swagger UI](https://billing-gateway.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/docs) · [MCP server](https://billing-mcp.orangeplant-9349f6a6.swedencentral.azurecontainerapps.io/health) · [Test data and how to reproduce](#test-data-and-how-to-reproduce) · [Agent scenarios](#live-runs-against-azure)  · Demonstration video: https://youtu.be/4V1Su9O3KYI?si=gUa9H5Gc36ZNw6XS
 
 ## Architecture
 
